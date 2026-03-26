@@ -1,0 +1,25 @@
+[package]
+name = "cubiomes-sys"
+version = "0.1.3"
+edition = "2021"
+authors = ["Ville Kujala"]
+description = "Raw ff binding for the cubiomes library"
+license = "MIT"
+keywords = ["minecraft", "minecraft-worldgen"]
+categories = ["external-ffi-bindings"]
+links = "cubiomes"
+readme = "README.md"
+repository = "https://github.com/villevilli/cubiomes-rs/"
+
+[features]
+default = ["cc_build"]
+cc_build = ["dep:cc"]
+
+[dependencies]
+num-traits = "0.2"
+num-derive = "0.4"
+
+
+[build-dependencies]
+bindgen = "0.71.0"
+cc = { version = "1.0", optional = true }

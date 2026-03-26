@@ -15,10 +15,12 @@ use eframe::egui::{
 };
 
 use crate::{
+    analysis::{format_coordinate_copy, format_nether_info, format_teleport_command},
     config::{search_worker_count, total_seeds, Controls},
     log_diag,
     preview::generate_preview,
     search::run_search,
+    templates::{get_templates_by_category, SearchTemplate},
     types::{
         FilterOption, LocatedBiome, LocatedStructure, MatchSummary, PreviewRequest,
         PreviewResponse, WorkerMessage, BIOME_FILTER_OPTIONS, STRUCTURE_FILTER_OPTIONS,
@@ -120,6 +122,9 @@ pub struct SeedFinderApp {
     pub last_error: Option<String>,
     pub theme: Theme,
     pub favorites: Vec<MatchSummary>,
+    pub selected_template: Option<String>,
+    pub show_template_panel: bool,
+    pub clipboard_message: Option<String>,
 }
 
 impl SeedFinderApp {
@@ -143,6 +148,9 @@ impl SeedFinderApp {
             last_error: None,
             theme: Theme::Dark,
             favorites: Vec::new(),
+            selected_template: None,
+            show_template_panel: false,
+            clipboard_message: None,
         }
     }
 
@@ -206,6 +214,29 @@ impl SeedFinderApp {
         self.search_cancel = None;
         self.search_rx = None;
         self.is_searching = false;
+    }
+
+    pub fn apply_template(&mut self, template: &SearchTemplate) {
+        self.controls.seed_start = template.config.seed_start.clone();
+        self.controls.seed_end = template.config.seed_end.clone();
+        self.controls.version = template.config.version.clone();
+        self.controls.limit = template.config.limit.clone();
+        self.controls.require_biome = template.config.require_biome.clone();
+        self.controls.forbid_biome = template.config.forbid_biome.clone();
+        self.controls.biome_radius = template.config.biome_radius.clone();
+        self.controls.biome_step = template.config.biome_step.clone();
+        self.controls.require_structure = template.config.require_structure.clone();
+        self.controls.structure_radius = template.config.structure_radius.clone();
+        self.controls.terrain_radius = template.config.terrain_radius.clone();
+        self.controls.min_avg_height = template.config.min_avg_height.clone();
+        self.controls.max_avg_height = template.config.max_avg_height.clone();
+        self.controls.max_relief = template.config.max_relief.clone();
+        self.selected_template = Some(template.id.to_string());
+        self.status_line = format!("已加载模板: {}", template.name);
+    }
+
+    pub fn copy_to_clipboard(&mut self, text: String) {
+        self.clipboard_message = Some(format!("请手动复制: {}", text));
     }
 
     pub fn clear_results(&mut self) {
@@ -538,6 +569,37 @@ impl SeedFinderApp {
                         });
 
                         ui.add_space(12.0);
+                        panel_section(ui, "预设模板", colors, |ui| {
+                            let templates_by_category = get_templates_by_category();
+                            for (category, templates) in templates_by_category {
+                                ui.label(
+                                    RichText::new(format!(
+                                        "{} {}",
+                                        category.icon(),
+                                        category.display()
+                                    ))
+                                    .size(12.0)
+                                    .color(colors.accent)
+                                    .strong(),
+                                );
+                                ui.add_space(4.0);
+                                for template in templates {
+                                    let is_selected =
+                                        self.selected_template.as_deref() == Some(template.id);
+                                    let mut btn =
+                                        Button::new(RichText::new(template.name).size(11.0));
+                                    if is_selected {
+                                        btn = btn.fill(colors.accent);
+                                    }
+                                    if ui.add(btn).on_hover_text(template.description).clicked() {
+                                        self.apply_template(&template);
+                                    }
+                                }
+                                ui.add_space(6.0);
+                            }
+                        });
+
+                        ui.add_space(12.0);
                         panel_section(ui, "搜索范围", colors, |ui| {
                             field_row(ui, "起始种子", &mut self.controls.seed_start, colors);
                             field_row(ui, "结束种子", &mut self.controls.seed_end, colors);
@@ -850,7 +912,95 @@ impl SeedFinderApp {
                 detail_chip(ui, "已收藏".into(), colors);
             }
         });
-        if let Some(terrain) = summary.terrain {
+
+        if let Some(score) = &summary.score {
+            ui.add_space(12.0);
+            let (r, g, b) = score.grade.color();
+            Frame::default()
+                .fill(Color32::from_rgb(r, g, b))
+                .corner_radius(CornerRadius::same(10))
+                .inner_margin(Margin::symmetric(12, 6))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(
+                            RichText::new(format!(
+                                "评分: {} ({:.1}分)",
+                                score.grade.display(),
+                                score.overall
+                            ))
+                            .size(14.0)
+                            .color(Color32::BLACK)
+                            .strong(),
+                        );
+                    });
+                });
+            ui.add_space(6.0);
+            ui.horizontal_wrapped(|ui| {
+                stat_pill(ui, "资源", format!("{:.0}", score.resource_score), colors);
+                stat_pill(ui, "安全", format!("{:.0}", score.safety_score), colors);
+                stat_pill(ui, "群系", format!("{:.0}", score.biome_diversity), colors);
+                stat_pill(ui, "结构", format!("{:.0}", score.structure_score), colors);
+                stat_pill(ui, "农场", format!("{:.0}", score.farming_score), colors);
+            });
+        }
+
+        if let Some(spawn_analysis) = &summary.spawn_analysis {
+            ui.add_space(12.0);
+            ui.label(
+                RichText::new("出生点分析")
+                    .size(13.0)
+                    .color(colors.text_secondary)
+                    .strong(),
+            );
+            ui.add_space(4.0);
+            if spawn_analysis.is_safe {
+                ui.label(
+                    RichText::new("✓ 安全出生点")
+                        .size(12.0)
+                        .color(Color32::from_rgb(100, 200, 100)),
+                );
+            } else {
+                ui.label(
+                    RichText::new("⚠ 出生点可能有风险")
+                        .size(12.0)
+                        .color(Color32::from_rgb(255, 150, 100)),
+                );
+            }
+            if !spawn_analysis.issues.is_empty() {
+                for issue in &spawn_analysis.issues {
+                    ui.label(
+                        RichText::new(format!("  • {}", issue))
+                            .size(11.0)
+                            .color(Color32::from_rgb(255, 180, 150)),
+                    );
+                }
+            }
+            if !spawn_analysis.advantages.is_empty() {
+                for adv in &spawn_analysis.advantages {
+                    ui.label(
+                        RichText::new(format!("  ✓ {}", adv))
+                            .size(11.0)
+                            .color(Color32::from_rgb(150, 220, 150)),
+                    );
+                }
+            }
+            if !spawn_analysis.nearby_resources.animals.is_empty() {
+                ui.add_space(4.0);
+                let animals: Vec<_> = spawn_analysis
+                    .nearby_resources
+                    .animals
+                    .iter()
+                    .map(|a| a.display())
+                    .collect();
+                ui.label(
+                    RichText::new(format!("附近动物: {}", animals.join(", ")))
+                        .size(11.0)
+                        .color(colors.text_secondary),
+                );
+            }
+        }
+
+        if let Some(terrain) = summary.terrain.as_ref() {
             ui.add_space(12.0);
             ui.label(
                 RichText::new("Terrain Metrics")
@@ -892,6 +1042,68 @@ impl SeedFinderApp {
             ui.add_space(5.0);
             ui.label(format_structure_hits(&summary.structures));
         }
+
+        ui.add_space(12.0);
+        ui.label(
+            RichText::new("快速操作")
+                .size(13.0)
+                .color(colors.text_secondary)
+                .strong(),
+        );
+        ui.add_space(4.0);
+        ui.horizontal_wrapped(|ui| {
+            let tp_cmd = format_teleport_command(summary.spawn, "overworld");
+            let coord = format_coordinate_copy(summary.spawn);
+            ui.label(
+                RichText::new(format!("坐标: {}", coord))
+                    .size(11.0)
+                    .color(colors.text_secondary),
+            );
+            ui.label(
+                RichText::new(format!("TP: {}", tp_cmd))
+                    .size(10.0)
+                    .color(Color32::from_rgb(100, 100, 100)),
+            );
+        });
+        ui.add_space(4.0);
+        ui.label(
+            RichText::new(format_nether_info(summary.spawn))
+                .size(11.0)
+                .color(colors.text_secondary),
+        );
+
+        if let Some(farming) = &summary.farming_analysis {
+            if !farming.iron_golem_villages.is_empty()
+                || !farming.special_biomes_for_farms.is_empty()
+            {
+                ui.add_space(12.0);
+                ui.label(
+                    RichText::new("农场潜力")
+                        .size(13.0)
+                        .color(colors.text_secondary)
+                        .strong(),
+                );
+                ui.add_space(4.0);
+                if farming.iron_golem_villages.len() >= 2 {
+                    ui.label(
+                        RichText::new(format!(
+                            "✓ {} 个村庄可用于刷铁机",
+                            farming.iron_golem_villages.len()
+                        ))
+                        .size(11.0)
+                        .color(Color32::from_rgb(100, 200, 100)),
+                    );
+                }
+                for (_biome, desc) in &farming.special_biomes_for_farms {
+                    ui.label(
+                        RichText::new(format!("• {}", desc))
+                            .size(11.0)
+                            .color(colors.text_secondary),
+                    );
+                }
+            }
+        }
+
         if let Some(version_warning) = &summary.version_warning {
             ui.add_space(12.0);
             info_warning(ui, version_warning, colors);

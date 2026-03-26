@@ -4,6 +4,8 @@ use cubiomes::{
 };
 use eframe::egui::ColorImage;
 
+use crate::scoring::{FarmingAnalysis, SeedScore, SpawnAnalysis};
+
 #[derive(Debug, Clone, Copy)]
 pub struct TerrainStats {
     pub min_height: f32,
@@ -22,6 +24,7 @@ pub struct LocatedBiome {
 pub struct LocatedStructure {
     pub position: BlockPosition,
     pub distance: f64,
+    pub structure_type: StructureType,
 }
 
 #[derive(Debug, Clone)]
@@ -35,6 +38,9 @@ pub struct MatchSummary {
     pub biomes: Vec<(BiomeID, LocatedBiome)>,
     pub structures: Vec<(StructureType, LocatedStructure)>,
     pub is_favorite: bool,
+    pub score: Option<SeedScore>,
+    pub spawn_analysis: Option<SpawnAnalysis>,
+    pub farming_analysis: Option<FarmingAnalysis>,
 }
 
 impl Default for MatchSummary {
@@ -49,6 +55,9 @@ impl Default for MatchSummary {
             biomes: Vec::new(),
             structures: Vec::new(),
             is_favorite: false,
+            score: None,
+            spawn_analysis: None,
+            farming_analysis: None,
         }
     }
 }

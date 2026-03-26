@@ -18,8 +18,10 @@ use cubiomes::{
 use cubiomes_sys::getSpawn;
 
 use crate::{
+    analysis::{analyze_farming_potential, analyze_spawn},
     config::{search_worker_count, total_seeds, SearchConfig},
     log_diag,
+    scoring::calculate_seed_score,
     types::{
         block_distance, LocatedBiome, LocatedStructure, MatchSummary, SearchEvent,
         TerrainStats, WorkerMessage,
@@ -258,8 +260,37 @@ fn evaluate_seed(
         else {
             return Ok(None);
         };
-        structure_hits.push((*structure, hit));
+        let mut located = hit;
+        located.structure_type = *structure;
+        structure_hits.push((*structure, located));
     }
+
+    let spawn_analysis = analyze_spawn(&generator, config.version, spawn, &biome_hits);
+    let farming_analysis = analyze_farming_potential(
+        &mut generator,
+        config.version,
+        spawn,
+        &structure_hits,
+        &biome_hits,
+    );
+    let score = calculate_seed_score(
+        &MatchSummary {
+            seed,
+            version: config.version,
+            version_label: config.version_label.clone(),
+            version_warning: None,
+            spawn,
+            terrain,
+            biomes: biome_hits.clone(),
+            structures: structure_hits.clone(),
+            is_favorite: false,
+            score: None,
+            spawn_analysis: Some(spawn_analysis.clone()),
+            farming_analysis: Some(farming_analysis.clone()),
+        },
+        &spawn_analysis,
+        &farming_analysis,
+    );
 
     Ok(Some(MatchSummary {
         seed,
@@ -271,6 +302,9 @@ fn evaluate_seed(
         biomes: biome_hits,
         structures: structure_hits,
         is_favorite: false,
+        score: Some(score),
+        spawn_analysis: Some(spawn_analysis),
+        farming_analysis: Some(farming_analysis),
     }))
 }
 
@@ -389,7 +423,11 @@ fn find_nearest_structure(
             match best {
                 Some(current) if current.distance <= distance => {}
                 _ => {
-                    best = Some(LocatedStructure { position, distance });
+                    best = Some(LocatedStructure {
+                        position,
+                        distance,
+                        structure_type: structure,
+                    });
                 }
             }
         }
