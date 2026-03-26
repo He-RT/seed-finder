@@ -1,0 +1,14 @@
+[package]
+name = "seed-finder"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+anyhow = "1.0.102"
+cubiomes = { version = "0.3.3", default-features = false, features = ["cc_build"] }
+cubiomes-sys = "0.1.3"
+eframe = "0.33.0"
+rfd = "0.15.0"
+
+[patch.crates-io]
+cubiomes-sys = { path = "vendor/cubiomes-sys" }
