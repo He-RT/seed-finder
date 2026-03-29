@@ -1,3 +1,5 @@
+use crate::config::DEFAULT_VERSION_INDEX;
+
 #[derive(Debug, Clone)]
 pub struct SearchTemplate {
     pub id: &'static str,
@@ -48,7 +50,7 @@ impl TemplateCategory {
 pub struct TemplateConfig {
     pub seed_start: String,
     pub seed_end: String,
-    pub version: String,
+    pub version_index: usize,
     pub limit: String,
     pub require_biome: String,
     pub forbid_biome: String,
@@ -67,7 +69,7 @@ impl Default for TemplateConfig {
         Self {
             seed_start: "1".into(),
             seed_end: "1000000".into(),
-            version: "1.21.1".into(),
+            version_index: DEFAULT_VERSION_INDEX,
             limit: "30".into(),
             require_biome: String::new(),
             forbid_biome: String::new(),

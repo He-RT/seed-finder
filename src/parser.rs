@@ -1,25 +1,5 @@
-use anyhow::{bail, ensure, Context, Result};
-use cubiomes::enums::{BiomeID, MCVersion, StructureType};
-use std::str::FromStr;
-
-pub fn parse_version_info(raw: &str) -> Result<(MCVersion, String, Option<String>)> {
-    let normalized = raw.trim();
-
-    if normalized == "26.1" {
-        return Ok((
-            MCVersion::MC_1_21_WD,
-            "26.1".into(),
-            Some(
-                "26.1 当前为实验兼容模式，内部暂用 1.21 WD 生成器近似，结果可能与正式版存在偏差"
-                    .into(),
-            ),
-        ));
-    }
-
-    let version = MCVersion::from_str(normalized)
-        .with_context(|| format!("不支持的版本 '{raw}'，例如 1.20.6、1.21.1、26.1"))?;
-    Ok((version, normalized.into(), None))
-}
+use anyhow::{Context, Result, bail, ensure};
+use cubiomes::enums::{BiomeID, StructureType};
 
 pub fn parse_biome_csv(raw: &str) -> Result<Vec<BiomeID>> {
     split_csv(raw)

@@ -1,8 +1,8 @@
 use std::{
     collections::HashMap,
     sync::{
-        atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
         Arc, Mutex, OnceLock,
+        atomic::{AtomicBool, AtomicI64, AtomicUsize, Ordering},
     },
     thread,
     time::{Duration, Instant},
@@ -19,12 +19,12 @@ use cubiomes_sys::getSpawn;
 
 use crate::{
     analysis::{analyze_farming_potential, analyze_spawn},
-    config::{search_worker_count, total_seeds, SearchConfig},
+    config::{SearchConfig, search_worker_count, total_seeds},
     log_diag,
     scoring::calculate_seed_score,
     types::{
-        block_distance, LocatedBiome, LocatedStructure, MatchSummary, SearchEvent,
-        TerrainStats, WorkerMessage,
+        LocatedBiome, LocatedStructure, MatchSummary, SearchEvent, TerrainStats, WorkerMessage,
+        block_distance, surface_y,
     },
 };
 
@@ -361,13 +361,9 @@ fn scan_biomes(
     required_biomes: &[BiomeID],
     forbidden_biomes: &[BiomeID],
 ) -> Result<HashMap<BiomeID, LocatedBiome>> {
-    let tracked: Vec<BiomeID> = required_biomes
-        .iter()
-        .chain(forbidden_biomes.iter())
-        .copied()
-        .collect();
     let mut found = HashMap::new();
     let y = surface_y(version);
+    let mut remaining_required = required_biomes.len();
 
     for x in (spawn.x - radius..=spawn.x + radius).step_by(step as usize) {
         for z in (spawn.z - radius..=spawn.z + radius).step_by(step as usize) {
@@ -375,17 +371,40 @@ fn scan_biomes(
                 .get_biome_at(x, y, z)
                 .with_context(|| format!("failed to get biome at ({x}, {z})"))?;
 
-            if !tracked.contains(&biome) {
+            let is_required = required_biomes.contains(&biome);
+            let is_forbidden = forbidden_biomes.contains(&biome);
+
+            if !is_required && !is_forbidden {
                 continue;
+            }
+
+            // Forbidden biome found — record it and we're done (caller will reject).
+            if is_forbidden {
+                let position = BlockPosition::new(x, z);
+                let distance = block_distance(spawn, position);
+                found.insert(biome, LocatedBiome { position, distance });
+                return Ok(found);
             }
 
             let position = BlockPosition::new(x, z);
             let distance = block_distance(spawn, position);
-            let entry = found
-                .entry(biome)
-                .or_insert(LocatedBiome { position, distance });
-            if distance < entry.distance {
-                *entry = LocatedBiome { position, distance };
+
+            use std::collections::hash_map::Entry;
+            match found.entry(biome) {
+                Entry::Vacant(e) => {
+                    e.insert(LocatedBiome { position, distance });
+                    remaining_required -= 1;
+                }
+                Entry::Occupied(mut e) => {
+                    if distance < e.get().distance {
+                        e.insert(LocatedBiome { position, distance });
+                    }
+                }
+            }
+
+            // All required biomes located and no forbidden found yet — done.
+            if remaining_required == 0 && forbidden_biomes.is_empty() {
+                return Ok(found);
             }
         }
     }
@@ -434,14 +453,6 @@ fn find_nearest_structure(
     }
 
     Ok(best)
-}
-
-fn surface_y(version: MCVersion) -> i32 {
-    if (version as i32) >= (MCVersion::MC_1_18_2 as i32) {
-        320
-    } else {
-        255
-    }
 }
 
 pub fn with_cubiomes_lock<T>(f: impl FnOnce() -> Result<T>) -> Result<T> {

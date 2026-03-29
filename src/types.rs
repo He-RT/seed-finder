@@ -316,3 +316,45 @@ pub fn block_distance(a: BlockPosition, b: BlockPosition) -> f64 {
     let dz = (a.z - b.z) as f64;
     (dx * dx + dz * dz).sqrt()
 }
+
+/// Returns the Y coordinate used for biome lookups on the given version.
+pub fn surface_y(version: MCVersion) -> i32 {
+    if (version as i32) >= (MCVersion::MC_1_18_2 as i32) {
+        320
+    } else {
+        255
+    }
+}
+
+/// Fast water-biome check (no allocation).
+pub fn is_water_biome(b: BiomeID) -> bool {
+    matches!(
+        b,
+        BiomeID::ocean
+            | BiomeID::deep_ocean
+            | BiomeID::warm_ocean
+            | BiomeID::cold_ocean
+            | BiomeID::frozen_ocean
+            | BiomeID::lukewarm_ocean
+            | BiomeID::deep_warm_ocean
+            | BiomeID::deep_cold_ocean
+            | BiomeID::deep_frozen_ocean
+            | BiomeID::river
+    )
+}
+
+/// Water biome check without river (for land-finding).
+pub fn is_ocean_biome(b: BiomeID) -> bool {
+    matches!(
+        b,
+        BiomeID::ocean
+            | BiomeID::deep_ocean
+            | BiomeID::warm_ocean
+            | BiomeID::cold_ocean
+            | BiomeID::frozen_ocean
+            | BiomeID::lukewarm_ocean
+            | BiomeID::deep_warm_ocean
+            | BiomeID::deep_cold_ocean
+            | BiomeID::deep_frozen_ocean
+    )
+}

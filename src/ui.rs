@@ -2,8 +2,8 @@ use std::{
     collections::BTreeSet,
     fs,
     sync::{
-        atomic::{AtomicBool, Ordering},
         Arc,
+        atomic::{AtomicBool, Ordering},
     },
     thread,
     time::Duration,
@@ -16,93 +16,99 @@ use eframe::egui::{
 
 use crate::{
     analysis::{format_coordinate_copy, format_nether_info, format_teleport_command},
-    config::{search_worker_count, total_seeds, Controls},
+    config::{Controls, VERSION_ENTRIES, search_worker_count, total_seeds},
     log_diag,
     preview::generate_preview,
     search::run_search,
-    templates::{get_templates_by_category, SearchTemplate},
+    templates::{SearchTemplate, get_templates_by_category},
     types::{
-        FilterOption, LocatedBiome, LocatedStructure, MatchSummary, PreviewRequest,
-        PreviewResponse, WorkerMessage, BIOME_FILTER_OPTIONS, STRUCTURE_FILTER_OPTIONS,
+        BIOME_FILTER_OPTIONS, FilterOption, MatchSummary, PreviewRequest, PreviewResponse,
+        STRUCTURE_FILTER_OPTIONS, WorkerMessage,
     },
 };
-use cubiomes::enums::{BiomeID, StructureType};
 
-#[derive(Debug, Clone, Copy, PartialEq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Theme {
-    Dark,
-    Light,
-    Ocean,
-    Forest,
+    Copper,
+    Coast,
+    Moss,
 }
 
 impl Theme {
-    pub fn colors(&self) -> ThemeColors {
+    fn label(self) -> &'static str {
         match self {
-            Theme::Dark => ThemeColors {
-                bg_primary: Color32::from_rgb(10, 16, 19),
-                bg_secondary: Color32::from_rgb(13, 18, 20),
-                bg_tertiary: Color32::from_rgb(20, 25, 24),
-                text_primary: Color32::from_rgb(240, 239, 232),
-                text_secondary: Color32::from_rgb(150, 171, 167),
-                accent: Color32::from_rgb(222, 157, 101),
-                accent_light: Color32::from_rgb(244, 224, 195),
-                border: Color32::from_rgb(57, 70, 65),
-                card_bg: Color32::from_rgb(23, 30, 29),
-                card_selected: Color32::from_rgb(60, 74, 67),
+            Theme::Copper => "铜版",
+            Theme::Coast => "海图",
+            Theme::Moss => "林野",
+        }
+    }
+
+    fn colors(self) -> Palette {
+        match self {
+            Theme::Copper => Palette {
+                bg: Color32::from_rgb(14, 16, 20),
+                panel: Color32::from_rgb(24, 27, 34),
+                panel_alt: Color32::from_rgb(31, 35, 43),
+                panel_soft: Color32::from_rgb(42, 36, 32),
+                text: Color32::from_rgb(238, 232, 223),
+                text_muted: Color32::from_rgb(161, 154, 147),
+                accent: Color32::from_rgb(220, 153, 90),
+                accent_soft: Color32::from_rgb(123, 88, 58),
+                border: Color32::from_rgb(77, 73, 68),
+                success: Color32::from_rgb(110, 199, 134),
+                warning: Color32::from_rgb(231, 191, 101),
+                danger: Color32::from_rgb(233, 120, 108),
+                preview_bg: Color32::from_rgb(10, 12, 15),
             },
-            Theme::Light => ThemeColors {
-                bg_primary: Color32::from_rgb(245, 245, 240),
-                bg_secondary: Color32::from_rgb(250, 250, 247),
-                bg_tertiary: Color32::from_rgb(240, 238, 230),
-                text_primary: Color32::from_rgb(30, 30, 25),
-                text_secondary: Color32::from_rgb(100, 100, 95),
-                accent: Color32::from_rgb(180, 120, 60),
-                accent_light: Color32::from_rgb(220, 180, 130),
-                border: Color32::from_rgb(200, 195, 185),
-                card_bg: Color32::from_rgb(255, 255, 252),
-                card_selected: Color32::from_rgb(230, 220, 200),
+            Theme::Coast => Palette {
+                bg: Color32::from_rgb(8, 17, 24),
+                panel: Color32::from_rgb(14, 27, 38),
+                panel_alt: Color32::from_rgb(19, 35, 47),
+                panel_soft: Color32::from_rgb(21, 46, 58),
+                text: Color32::from_rgb(228, 243, 247),
+                text_muted: Color32::from_rgb(132, 171, 182),
+                accent: Color32::from_rgb(102, 198, 206),
+                accent_soft: Color32::from_rgb(50, 104, 112),
+                border: Color32::from_rgb(49, 87, 101),
+                success: Color32::from_rgb(109, 208, 160),
+                warning: Color32::from_rgb(226, 190, 108),
+                danger: Color32::from_rgb(227, 122, 119),
+                preview_bg: Color32::from_rgb(6, 13, 18),
             },
-            Theme::Ocean => ThemeColors {
-                bg_primary: Color32::from_rgb(8, 20, 30),
-                bg_secondary: Color32::from_rgb(12, 28, 40),
-                bg_tertiary: Color32::from_rgb(18, 38, 55),
-                text_primary: Color32::from_rgb(230, 245, 255),
-                text_secondary: Color32::from_rgb(130, 180, 210),
-                accent: Color32::from_rgb(60, 180, 220),
-                accent_light: Color32::from_rgb(150, 210, 240),
-                border: Color32::from_rgb(40, 80, 110),
-                card_bg: Color32::from_rgb(15, 35, 50),
-                card_selected: Color32::from_rgb(30, 60, 85),
-            },
-            Theme::Forest => ThemeColors {
-                bg_primary: Color32::from_rgb(15, 22, 12),
-                bg_secondary: Color32::from_rgb(18, 28, 15),
-                bg_tertiary: Color32::from_rgb(22, 35, 18),
-                text_primary: Color32::from_rgb(235, 245, 230),
-                text_secondary: Color32::from_rgb(140, 175, 130),
-                accent: Color32::from_rgb(120, 190, 80),
-                accent_light: Color32::from_rgb(180, 220, 140),
-                border: Color32::from_rgb(50, 75, 45),
-                card_bg: Color32::from_rgb(25, 38, 22),
-                card_selected: Color32::from_rgb(45, 70, 40),
+            Theme::Moss => Palette {
+                bg: Color32::from_rgb(12, 18, 14),
+                panel: Color32::from_rgb(21, 29, 22),
+                panel_alt: Color32::from_rgb(28, 39, 29),
+                panel_soft: Color32::from_rgb(34, 47, 29),
+                text: Color32::from_rgb(236, 244, 229),
+                text_muted: Color32::from_rgb(146, 170, 141),
+                accent: Color32::from_rgb(154, 198, 98),
+                accent_soft: Color32::from_rgb(76, 109, 54),
+                border: Color32::from_rgb(60, 82, 54),
+                success: Color32::from_rgb(112, 207, 128),
+                warning: Color32::from_rgb(224, 193, 94),
+                danger: Color32::from_rgb(224, 124, 102),
+                preview_bg: Color32::from_rgb(8, 12, 9),
             },
         }
     }
 }
 
-#[derive(Clone)]
-pub struct ThemeColors {
-    pub bg_primary: Color32,
-    pub bg_secondary: Color32,
-    pub bg_tertiary: Color32,
-    pub text_primary: Color32,
-    pub text_secondary: Color32,
-    pub accent: Color32,
-    pub accent_light: Color32,
-    pub border: Color32,
-    pub card_bg: Color32,
-    pub card_selected: Color32,
+#[derive(Clone, Copy)]
+struct Palette {
+    bg: Color32,
+    panel: Color32,
+    panel_alt: Color32,
+    panel_soft: Color32,
+    text: Color32,
+    text_muted: Color32,
+    accent: Color32,
+    accent_soft: Color32,
+    border: Color32,
+    success: Color32,
+    warning: Color32,
+    danger: Color32,
+    preview_bg: Color32,
 }
 
 pub struct SeedFinderApp {
@@ -121,15 +127,16 @@ pub struct SeedFinderApp {
     pub is_searching: bool,
     pub last_error: Option<String>,
     pub theme: Theme,
+    pub applied_theme: Option<Theme>,
     pub favorites: Vec<MatchSummary>,
     pub selected_template: Option<String>,
     pub show_template_panel: bool,
-    pub clipboard_message: Option<String>,
 }
 
 impl SeedFinderApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         configure_fonts(&cc.egui_ctx);
+        configure_theme(&cc.egui_ctx, Theme::Copper.colors());
 
         Self {
             controls: Controls::default(),
@@ -140,17 +147,17 @@ impl SeedFinderApp {
             search_cancel: None,
             preview_token: 0,
             preview_texture: None,
-            preview_status: "选择右侧结果后显示地图预览".into(),
+            preview_status: "选择结果后生成地图预览".into(),
             status_line: "准备就绪".into(),
-            info_line: "左侧输入条件，点击开始筛选".into(),
+            info_line: "先选模板，或直接调整条件后开始筛种。".into(),
             progress: None,
             is_searching: false,
             last_error: None,
-            theme: Theme::Dark,
+            theme: Theme::Copper,
+            applied_theme: None,
             favorites: Vec::new(),
             selected_template: None,
-            show_template_panel: false,
-            clipboard_message: None,
+            show_template_panel: true,
         }
     }
 
@@ -159,8 +166,8 @@ impl SeedFinderApp {
         let config = match self.controls.to_config() {
             Ok(config) => config,
             Err(err) => {
-                log_diag(&format!("ui_start_search_invalid_config: {err}"));
                 self.last_error = Some(err.to_string());
+                self.status_line = "参数无效".into();
                 return;
             }
         };
@@ -170,7 +177,7 @@ impl SeedFinderApp {
         self.selected_result = None;
         self.preview_rx = None;
         self.preview_texture = None;
-        self.preview_status = "搜索完成后，点击下方种子生成地图预览".into();
+        self.preview_status = "正在等待搜索结果，点击命中项后会在这里显示地图。".into();
         self.progress = Some((0, total_seeds(&config), 0, config.seed_start));
         self.status_line = "正在搜索".into();
         let worker_count = search_worker_count(&config);
@@ -186,19 +193,12 @@ impl SeedFinderApp {
         let cancel = Arc::new(AtomicBool::new(false));
         let cancel_clone = Arc::clone(&cancel);
         let ctx = ctx.clone();
-        log_diag(&format!(
-            "search_spawn_thread range={}..={} version={}",
-            config.seed_start, config.seed_end, config.version_label
-        ));
 
         thread::spawn(move || {
-            log_diag("search_thread_enter");
             let result = run_search(config, cancel_clone, tx.clone());
             if let Err(err) = result {
-                log_diag(&format!("search_thread_error: {err}"));
                 let _ = tx.send(WorkerMessage::Error(err.to_string()));
             }
-            log_diag("search_thread_exit");
             ctx.request_repaint();
         });
 
@@ -219,7 +219,7 @@ impl SeedFinderApp {
     pub fn apply_template(&mut self, template: &SearchTemplate) {
         self.controls.seed_start = template.config.seed_start.clone();
         self.controls.seed_end = template.config.seed_end.clone();
-        self.controls.version = template.config.version.clone();
+        self.controls.version_index = template.config.version_index;
         self.controls.limit = template.config.limit.clone();
         self.controls.require_biome = template.config.require_biome.clone();
         self.controls.forbid_biome = template.config.forbid_biome.clone();
@@ -233,10 +233,7 @@ impl SeedFinderApp {
         self.controls.max_relief = template.config.max_relief.clone();
         self.selected_template = Some(template.id.to_string());
         self.status_line = format!("已加载模板: {}", template.name);
-    }
-
-    pub fn copy_to_clipboard(&mut self, text: String) {
-        self.clipboard_message = Some(format!("请手动复制: {}", text));
+        self.info_line = template.description.into();
     }
 
     pub fn clear_results(&mut self) {
@@ -245,9 +242,9 @@ impl SeedFinderApp {
         self.selected_result = None;
         self.preview_rx = None;
         self.preview_texture = None;
-        self.preview_status = "选择右侧结果后显示地图预览".into();
+        self.preview_status = "选择结果后生成地图预览".into();
         self.status_line = "结果已清空".into();
-        self.info_line.clear();
+        self.info_line = "可以继续调整条件后重新搜索。".into();
         self.progress = None;
         self.last_error = None;
     }
@@ -257,7 +254,6 @@ impl SeedFinderApp {
             return;
         }
         self.results[index].is_favorite = !self.results[index].is_favorite;
-
         if self.results[index].is_favorite {
             self.favorites.push(self.results[index].clone());
         } else {
@@ -278,39 +274,20 @@ impl SeedFinderApp {
                 "  Spawn: ({}, {})\n",
                 summary.spawn.x, summary.spawn.z
             ));
-
-            if let Some(terrain) = summary.terrain.as_ref() {
+            if let Some(score) = &summary.score {
                 output.push_str(&format!(
-                    "  Terrain: avg={:.1}, min={:.1}, max={:.1}, relief={:.1}\n",
-                    terrain.avg_height, terrain.min_height, terrain.max_height, terrain.relief
-                ));
-            }
-
-            for (biome, hit) in &summary.biomes {
-                output.push_str(&format!(
-                    "  Biome: {} at ({}, {}) {:.0}m\n",
-                    biome.to_mc_biome_str(summary.version),
-                    hit.position.x,
-                    hit.position.z,
-                    hit.distance
-                ));
-            }
-
-            for (structure, hit) in &summary.structures {
-                output.push_str(&format!(
-                    "  Structure: {} at ({}, {}) {:.0}m\n",
-                    structure, hit.position.x, hit.position.z, hit.distance
+                    "  Score: {} ({:.1})\n",
+                    score.grade.display(),
+                    score.overall
                 ));
             }
             output.push('\n');
         }
-
         output
     }
 
-    pub fn receive_worker_messages(&mut self, _ctx: &EguiContext) {
-        let mut should_clear_receiver = false;
-
+    fn receive_worker_messages(&mut self) {
+        let mut clear = false;
         if let Some(rx) = &self.search_rx {
             while let Ok(message) = rx.try_recv() {
                 match message {
@@ -322,12 +299,12 @@ impl SeedFinderApp {
                     } => {
                         self.progress = Some((searched, total, found, current_seed));
                         self.status_line = format!("正在搜索，已检查 {searched}/{total}");
-                        self.info_line = format!("当前种子 {current_seed}，已命中 {found}");
+                        self.info_line = format!("当前种子 {current_seed}，命中 {found}");
                     }
                     WorkerMessage::Match(summary) => {
                         self.results.push(summary);
-                        self.status_line = format!("已找到 {} 个命中种子", self.results.len());
-                        self.info_line = "点击下方结果可切换地图预览".into();
+                        self.status_line = format!("已找到 {} 个候选种子", self.results.len());
+                        self.info_line = "点击右侧结果卡片查看地图与分析。".into();
                     }
                     WorkerMessage::Finished {
                         searched,
@@ -338,16 +315,16 @@ impl SeedFinderApp {
                         self.search_cancel = None;
                         self.progress = None;
                         self.status_line = if stopped {
-                            format!("已停止，累计检查 {searched} 个种子")
+                            format!("搜索已停止，累计检查 {searched} 个种子")
                         } else {
                             format!("搜索完成，共命中 {found} 个种子")
                         };
                         self.info_line = if found == 0 {
-                            "没有找到符合条件的种子".into()
+                            "没有找到符合条件的结果。".into()
                         } else {
-                            "点击下方结果可切换地图预览".into()
+                            "结果已更新，点击查看详情。".into()
                         };
-                        should_clear_receiver = true;
+                        clear = true;
                     }
                     WorkerMessage::Error(err) => {
                         self.is_searching = false;
@@ -355,24 +332,22 @@ impl SeedFinderApp {
                         self.progress = None;
                         self.last_error = Some(err);
                         self.status_line = "搜索失败".into();
-                        should_clear_receiver = true;
+                        clear = true;
                     }
                 }
             }
         }
-
-        if should_clear_receiver {
+        if clear {
             self.search_rx = None;
         }
     }
 
-    pub fn receive_preview_messages(&mut self, ctx: &EguiContext) {
+    fn receive_preview_messages(&mut self, ctx: &EguiContext) {
         if let Some(rx) = &self.preview_rx {
             while let Ok(message) = rx.try_recv() {
                 if message.token != self.preview_token {
                     continue;
                 }
-
                 match message.image {
                     Ok(image) => {
                         self.preview_texture =
@@ -392,21 +367,12 @@ impl SeedFinderApp {
         if index >= self.results.len() {
             return;
         }
-
         self.selected_result = Some(index);
-        self.preview_status = if self.is_searching {
-            format!(
-                "正在生成种子 {} 的地图预览，搜索会继续进行",
-                self.results[index].seed
-            )
-        } else {
-            format!("正在切换到种子 {} 的地图预览", self.results[index].seed)
-        };
+        self.preview_status = format!("正在加载种子 {} 的地图预览", self.results[index].seed);
         self.start_preview(self.results[index].clone(), ctx);
     }
 
     pub fn start_preview(&mut self, summary: MatchSummary, ctx: &EguiContext) {
-        log_diag(&format!("preview_requested seed={}", summary.seed));
         let radius = match self.controls.preview_radius() {
             Ok(radius) => radius,
             Err(err) => {
@@ -426,7 +392,6 @@ impl SeedFinderApp {
 
         self.preview_token = self.preview_token.wrapping_add(1);
         self.preview_texture = None;
-        self.preview_status = format!("正在生成种子 {} 的地图", summary.seed);
 
         let request = PreviewRequest {
             token: self.preview_token,
@@ -438,1061 +403,1051 @@ impl SeedFinderApp {
         let (tx, rx) = std::sync::mpsc::channel();
         let ctx = ctx.clone();
         thread::spawn(move || {
-            log_diag(&format!(
-                "preview_thread_enter seed={}",
-                request.summary.seed
-            ));
             let image = generate_preview(&request).map_err(|err| err.to_string());
             let _ = tx.send(PreviewResponse {
                 token: request.token,
                 image,
             });
-            log_diag(&format!(
-                "preview_thread_exit seed={}",
-                request.summary.seed
-            ));
             ctx.request_repaint();
         });
-
         self.preview_rx = Some(rx);
     }
 
     pub fn draw_ui(&mut self, ctx: &EguiContext) {
         let colors = self.theme.colors();
-        configure_theme_with_colors(ctx, &colors);
+        if self.applied_theme != Some(self.theme) {
+            configure_theme(ctx, colors);
+            self.applied_theme = Some(self.theme);
+        }
 
-        self.draw_left_panel(ctx, &colors);
-        self.draw_main_panel(ctx, &colors);
-    }
-
-    fn draw_left_panel(&mut self, ctx: &EguiContext, colors: &ThemeColors) {
-        egui::SidePanel::left("controls-panel")
-            .exact_width(348.0)
+        egui::TopBottomPanel::top("topbar")
             .frame(
                 Frame::default()
-                    .fill(colors.bg_secondary)
-                    .inner_margin(Margin::same(14)),
+                    .fill(colors.panel_alt)
+                    .inner_margin(Margin::symmetric(20, 12)),
             )
-            .show(ctx, |ui| {
-                ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        hero_panel(
-                            ui,
-                            "Seed Finder",
-                            "Java 版地形与结构筛种工作台",
-                            &self.status_line,
-                            colors,
-                        );
+            .show(ctx, |ui| self.draw_topbar(ui, colors));
 
-                        ui.add_space(14.0);
-                        panel_section(ui, "运行状态", colors, |ui| {
-                            ui.label(
-                                RichText::new(&self.status_line)
-                                    .size(16.0)
-                                    .color(colors.text_primary)
-                                    .strong(),
-                            );
-                            if !self.info_line.is_empty() {
-                                ui.add_space(4.0);
-                                ui.label(
-                                    RichText::new(&self.info_line)
-                                        .size(13.0)
-                                        .color(colors.text_secondary),
-                                );
-                            }
-                            ui.add_space(10.0);
-                            ui.horizontal_wrapped(|ui| {
-                                stat_pill(ui, "命中", self.results.len().to_string(), colors);
-                                stat_pill(
-                                    ui,
-                                    "当前版本",
-                                    self.controls.version.trim().to_owned(),
-                                    colors,
-                                );
-                                if let Some((searched, total, _, _)) = self.progress {
-                                    stat_pill(ui, "进度", format!("{searched}/{total}"), colors);
-                                }
-                            });
-                            if let Some((searched, total, found, current_seed)) = self.progress {
-                                ui.add_space(10.0);
-                                let progress = if total == 0 {
-                                    0.0
-                                } else {
-                                    searched as f32 / total as f32
-                                };
-                                let progress_width = ui.available_width().max(120.0);
-                                ui.add(
-                                    egui::ProgressBar::new(progress)
-                                        .desired_width(progress_width)
-                                        .fill(colors.accent)
-                                        .text(format!("{searched}/{total} seeds")),
-                                );
-                                ui.add_space(4.0);
-                                ui.label(
-                                    RichText::new(format!(
-                                        "当前 {}，已命中 {}",
-                                        current_seed, found
-                                    ))
-                                    .size(12.5)
-                                    .color(colors.text_secondary),
-                                );
-                            }
-                            if let Some(error) = &self.last_error {
-                                ui.add_space(8.0);
-                                ui.colored_label(Color32::from_rgb(255, 134, 116), error);
-                            }
-                        });
+        egui::SidePanel::left("left_controls")
+            .resizable(true)
+            .default_width(340.0)
+            .min_width(280.0)
+            .frame(
+                Frame::default()
+                    .fill(colors.panel)
+                    .inner_margin(Margin::same(16)),
+            )
+            .show(ctx, |ui| self.draw_left_panel(ui, ctx, colors));
 
-                        ui.add_space(12.0);
-                        panel_section(ui, "主题切换", colors, |ui| {
-                            ui.horizontal(|ui| {
-                                for theme in
-                                    [Theme::Dark, Theme::Light, Theme::Ocean, Theme::Forest]
-                                {
-                                    let label = match theme {
-                                        Theme::Dark => "深色",
-                                        Theme::Light => "浅色",
-                                        Theme::Ocean => "海洋",
-                                        Theme::Forest => "森林",
-                                    };
-                                    let is_current = self.theme == theme;
-                                    let mut btn = Button::new(RichText::new(label).size(12.0));
-                                    if is_current {
-                                        btn = btn.fill(colors.accent);
-                                    }
-                                    if ui.add(btn).clicked() {
-                                        self.theme = theme;
-                                    }
-                                }
-                            });
-                        });
+        if self.selected_result.is_some() || self.is_searching {
+            egui::SidePanel::right("right_inspector")
+                .resizable(true)
+                .default_width(420.0)
+                .min_width(360.0)
+                .frame(
+                    Frame::default()
+                        .fill(colors.panel)
+                        .inner_margin(Margin::same(16)),
+                )
+                .show(ctx, |ui| self.draw_right_inspector(ui, colors));
+        }
 
-                        ui.add_space(12.0);
-                        panel_section(ui, "预设模板", colors, |ui| {
-                            let templates_by_category = get_templates_by_category();
-                            for (category, templates) in templates_by_category {
-                                ui.label(
-                                    RichText::new(format!(
-                                        "{} {}",
-                                        category.icon(),
-                                        category.display()
-                                    ))
-                                    .size(12.0)
-                                    .color(colors.accent)
-                                    .strong(),
-                                );
-                                ui.add_space(4.0);
-                                for template in templates {
-                                    let is_selected =
-                                        self.selected_template.as_deref() == Some(template.id);
-                                    let mut btn =
-                                        Button::new(RichText::new(template.name).size(11.0));
-                                    if is_selected {
-                                        btn = btn.fill(colors.accent);
-                                    }
-                                    if ui.add(btn).on_hover_text(template.description).clicked() {
-                                        self.apply_template(&template);
-                                    }
-                                }
-                                ui.add_space(6.0);
-                            }
-                        });
-
-                        ui.add_space(12.0);
-                        panel_section(ui, "搜索范围", colors, |ui| {
-                            field_row(ui, "起始种子", &mut self.controls.seed_start, colors);
-                            field_row(ui, "结束种子", &mut self.controls.seed_end, colors);
-                            numeric_pair(
-                                ui,
-                                "版本",
-                                &mut self.controls.version,
-                                "命中上限",
-                                &mut self.controls.limit,
-                                colors,
-                            );
-                        });
-
-                        ui.add_space(12.0);
-                        panel_section(ui, "生物群系约束", colors, |ui| {
-                            multiselect_dropdown(
-                                ui,
-                                "需要生物群系",
-                                &mut self.controls.require_biome,
-                                BIOME_FILTER_OPTIONS,
-                                "require_biome_dropdown",
-                                colors,
-                            );
-                            multiselect_dropdown(
-                                ui,
-                                "排除生物群系",
-                                &mut self.controls.forbid_biome,
-                                BIOME_FILTER_OPTIONS,
-                                "forbid_biome_dropdown",
-                                colors,
-                            );
-                            numeric_pair(
-                                ui,
-                                "搜索半径",
-                                &mut self.controls.biome_radius,
-                                "采样步长",
-                                &mut self.controls.biome_step,
-                                colors,
-                            );
-                        });
-
-                        ui.add_space(12.0);
-                        panel_section(ui, "结构与地形", colors, |ui| {
-                            multiselect_dropdown(
-                                ui,
-                                "需要结构",
-                                &mut self.controls.require_structure,
-                                STRUCTURE_FILTER_OPTIONS,
-                                "require_structure_dropdown",
-                                colors,
-                            );
-                            numeric_pair(
-                                ui,
-                                "结构半径",
-                                &mut self.controls.structure_radius,
-                                "地形半径",
-                                &mut self.controls.terrain_radius,
-                                colors,
-                            );
-                            numeric_pair(
-                                ui,
-                                "最小平均高",
-                                &mut self.controls.min_avg_height,
-                                "最大平均高",
-                                &mut self.controls.max_avg_height,
-                                colors,
-                            );
-                            field_row(ui, "最大高差", &mut self.controls.max_relief, colors);
-                        });
-
-                        ui.add_space(12.0);
-                        panel_section(ui, "预览输出", colors, |ui| {
-                            numeric_pair(
-                                ui,
-                                "预览半径",
-                                &mut self.controls.preview_radius,
-                                "图像尺寸",
-                                &mut self.controls.preview_image_size,
-                                colors,
-                            );
-                        });
-
-                        ui.add_space(14.0);
-                        Frame::default()
-                            .fill(colors.bg_tertiary)
-                            .stroke(Stroke::new(1.0, colors.border))
-                            .corner_radius(CornerRadius::same(18))
-                            .inner_margin(Margin::same(12))
-                            .show(ui, |ui| {
-                                ui.horizontal(|ui| {
-                                    let search_label = if self.is_searching {
-                                        "搜索进行中"
-                                    } else {
-                                        "开始筛选"
-                                    };
-                                    if ui
-                                        .add_sized(
-                                            [136.0, 46.0],
-                                            Button::new(
-                                                RichText::new(search_label)
-                                                    .size(15.0)
-                                                    .strong()
-                                                    .color(Color32::from_rgb(20, 24, 24)),
-                                            )
-                                            .fill(colors.accent),
-                                        )
-                                        .clicked()
-                                        && !self.is_searching
-                                    {
-                                        self.start_search(ctx);
-                                    }
-
-                                    if ui
-                                        .add_enabled(
-                                            self.is_searching,
-                                            Button::new(RichText::new("停止").size(15.0))
-                                                .min_size(Vec2::new(84.0, 46.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.stop_search();
-                                        self.status_line = "已请求停止搜索".into();
-                                    }
-
-                                    if ui
-                                        .add_sized(
-                                            [84.0, 46.0],
-                                            Button::new(RichText::new("清空").size(15.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        self.clear_results();
-                                    }
-                                });
-
-                                ui.add_space(8.0);
-                                ui.horizontal(|ui| {
-                                    if ui
-                                        .add_sized(
-                                            [100.0, 36.0],
-                                            Button::new(RichText::new("导出结果").size(13.0)),
-                                        )
-                                        .clicked()
-                                        && !self.results.is_empty()
-                                    {
-                                        let export = self.export_results();
-                                        if let Some(path) = rfd::FileDialog::new()
-                                            .add_filter("Text", &["txt"])
-                                            .save_file()
-                                        {
-                                            let _ = fs::write(path, export);
-                                        }
-                                    }
-
-                                    if ui
-                                        .add_sized(
-                                            [100.0, 36.0],
-                                            Button::new(RichText::new("收藏列表").size(13.0)),
-                                        )
-                                        .clicked()
-                                    {
-                                        if !self.favorites.is_empty() {
-                                            self.results = self.favorites.clone();
-                                            self.selected_result = None;
-                                            self.preview_texture = None;
-                                            self.preview_status =
-                                                format!("已加载 {} 个收藏种子", self.results.len());
-                                        }
-                                    }
-                                });
-                            });
-                        ui.add_space(10.0);
-                    });
-            });
-    }
-
-    fn draw_main_panel(&mut self, ctx: &EguiContext, colors: &ThemeColors) {
         egui::CentralPanel::default()
             .frame(
                 Frame::default()
-                    .fill(colors.bg_primary)
-                    .inner_margin(Margin::same(18)),
+                    .fill(colors.bg)
+                    .inner_margin(Margin::same(20)),
             )
-            .show(ctx, |ui| {
-                ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .show(ui, |ui| {
-                        ui.vertical(|ui| {
-                            self.draw_preview_area(ui, colors);
-                            ui.add_space(18.0);
-                            self.draw_results_area(ui, ctx, colors);
-                        });
-                    });
-            });
+            .show(ctx, |ui| self.draw_center_ledger(ui, ctx, colors));
     }
 
-    fn draw_preview_area(&mut self, ui: &mut egui::Ui, colors: &ThemeColors) {
-        Frame::default()
-            .fill(colors.bg_secondary)
-            .stroke(Stroke::new(1.0, colors.border))
-            .corner_radius(CornerRadius::same(22))
-            .inner_margin(Margin::same(18))
-            .show(ui, |ui| {
+    fn draw_topbar(&mut self, ui: &mut egui::Ui, colors: Palette) {
+        ui.horizontal(|ui| {
+            ui.vertical(|ui| {
                 ui.horizontal(|ui| {
-                    ui.vertical(|ui| {
-                        ui.label(
-                            RichText::new("Terrain Canvas")
-                                .size(26.0)
-                                .color(colors.text_primary)
-                                .strong(),
-                        );
-                        ui.add_space(2.0);
-                        ui.label(
-                            RichText::new("出生点周边地形、生物群系与结构叠加视图")
-                                .size(13.0)
-                                .color(colors.text_secondary),
-                        );
-                    });
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        info_badge(ui, &self.preview_status, colors);
-                    });
+                    ui.label(
+                        RichText::new("Seed Finder")
+                            .size(20.0)
+                            .color(colors.text)
+                            .strong()
+                            .monospace(),
+                    );
+                    ui.label(
+                        RichText::new("数据分析控制台")
+                            .size(12.0)
+                            .color(colors.accent)
+                            .monospace(),
+                    );
                 });
-                ui.add_space(14.0);
-                let available = ui.available_width();
-                let preview_height = ui.available_height().clamp(320.0, 460.0);
-                ui.columns(2, |columns| {
-                    let dossier_width = 320.0;
-                    let map_width = (available - dossier_width - 20.0).max(320.0);
-                    Frame::default()
-                        .fill(colors.bg_primary)
-                        .corner_radius(CornerRadius::same(18))
-                        .stroke(Stroke::new(1.0, colors.border))
-                        .inner_margin(Margin::same(14))
-                        .show(&mut columns[0], |ui| {
-                            ui.set_min_size(Vec2::new(map_width, preview_height));
-                            ui.centered_and_justified(|ui| {
-                                if let Some(texture) = &self.preview_texture {
-                                    let size = texture.size_vec2();
-                                    let scale = ((map_width - 32.0) / size.x)
-                                        .min((preview_height - 32.0) / size.y)
-                                        .max(0.1);
-                                    ui.image((texture.id(), size * scale));
-                                } else {
-                                    ui.vertical_centered(|ui| {
-                                        if self.selected_result.is_some() {
-                                            ui.add(egui::Spinner::new().size(24.0));
-                                            ui.add_space(10.0);
-                                        }
-                                        ui.label(
-                                            RichText::new(&self.preview_status)
-                                                .size(15.0)
-                                                .color(colors.text_secondary),
-                                        );
-                                    });
-                                }
-                            });
-                        });
-                    Frame::default()
-                        .fill(colors.bg_tertiary)
-                        .corner_radius(CornerRadius::same(18))
-                        .stroke(Stroke::new(1.0, colors.border))
-                        .inner_margin(Margin::same(14))
-                        .show(&mut columns[1], |ui| {
-                            ui.set_min_size(Vec2::new(dossier_width, preview_height));
-                            ui.label(
-                                RichText::new("Seed Dossier")
-                                    .size(18.0)
-                                    .color(colors.text_primary)
-                                    .strong(),
-                            );
-                            ui.add_space(10.0);
-                            ui.label(
-                                RichText::new("当前选中种子的关键地形与结构情报")
-                                    .size(13.0)
-                                    .color(colors.text_secondary),
-                            );
-                            ui.add_space(10.0);
-                            ui.horizontal_wrapped(|ui| {
-                                legend_chip(ui, Color32::WHITE, "出生点", colors);
-                                legend_chip(ui, colors.accent, "结构", colors);
-                                legend_chip(ui, Color32::from_rgb(93, 215, 198), "命中生物群系", colors);
-                            });
-                            ui.add_space(12.0);
-                            if let Some(index) = self.selected_result {
-                                self.draw_seed_dossier(ui, &self.results[index], colors);
-                            } else {
-                                info_warning(ui, "从下方 Matches 里点一条种子后，这里会显示其出生点、版本、地形指标、生物群系和结构摘要。", colors);
-                            }
-                        });
-                });
+                ui.label(
+                    RichText::new(&self.info_line)
+                        .size(12.0)
+                        .color(colors.text_muted),
+                );
             });
+
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                for theme in [Theme::Copper, Theme::Coast, Theme::Moss] {
+                    let is_selected = self.theme == theme;
+                    let text_color = if is_selected {
+                        colors.bg
+                    } else {
+                        colors.text_muted
+                    };
+                    let fill_color = if is_selected {
+                        colors.accent
+                    } else {
+                        colors.panel_soft
+                    };
+                    let mut button =
+                        Button::new(RichText::new(theme.label()).size(12.0).color(text_color));
+                    if is_selected {
+                        button = button.fill(fill_color);
+                    }
+                    if ui.add(button).clicked() {
+                        self.theme = theme;
+                    }
+                }
+
+                ui.add_space(16.0);
+                stat_badge(ui, colors, "收藏", &self.favorites.len().to_string());
+                stat_badge(ui, colors, "状态", &self.status_line);
+            });
+        });
     }
 
-    fn draw_seed_dossier(&self, ui: &mut egui::Ui, summary: &MatchSummary, colors: &ThemeColors) {
-        ui.label(
-            RichText::new(format!("Seed {}", summary.seed))
-                .size(24.0)
-                .color(colors.text_primary)
-                .strong(),
-        );
-        ui.add_space(8.0);
-        ui.horizontal_wrapped(|ui| {
-            detail_chip(
-                ui,
-                format!("Spawn ({}, {})", summary.spawn.x, summary.spawn.z),
-                colors,
-            );
-            detail_chip(ui, format!("Version {}", summary.version_label), colors);
-            if summary.is_favorite {
-                detail_chip(ui, "已收藏".into(), colors);
-            }
-        });
-
-        if let Some(score) = &summary.score {
-            ui.add_space(12.0);
-            let (r, g, b) = score.grade.color();
-            Frame::default()
-                .fill(Color32::from_rgb(r, g, b))
-                .corner_radius(CornerRadius::same(10))
-                .inner_margin(Margin::symmetric(12, 6))
-                .show(ui, |ui| {
-                    ui.horizontal(|ui| {
-                        ui.label(
-                            RichText::new(format!(
-                                "评分: {} ({:.1}分)",
-                                score.grade.display(),
-                                score.overall
-                            ))
-                            .size(14.0)
-                            .color(Color32::BLACK)
-                            .strong(),
-                        );
-                    });
-                });
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                stat_pill(ui, "资源", format!("{:.0}", score.resource_score), colors);
-                stat_pill(ui, "安全", format!("{:.0}", score.safety_score), colors);
-                stat_pill(ui, "群系", format!("{:.0}", score.biome_diversity), colors);
-                stat_pill(ui, "结构", format!("{:.0}", score.structure_score), colors);
-                stat_pill(ui, "农场", format!("{:.0}", score.farming_score), colors);
-            });
-        }
-
-        if let Some(spawn_analysis) = &summary.spawn_analysis {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new("出生点分析")
-                    .size(13.0)
-                    .color(colors.text_secondary)
-                    .strong(),
-            );
+    fn draw_left_panel(&mut self, ui: &mut egui::Ui, ctx: &EguiContext, colors: Palette) {
+        ScrollArea::vertical().show(ui, |ui| {
             ui.add_space(4.0);
-            if spawn_analysis.is_safe {
-                ui.label(
-                    RichText::new("✓ 安全出生点")
-                        .size(12.0)
-                        .color(Color32::from_rgb(100, 200, 100)),
-                );
-            } else {
-                ui.label(
-                    RichText::new("⚠ 出生点可能有风险")
-                        .size(12.0)
-                        .color(Color32::from_rgb(255, 150, 100)),
-                );
-            }
-            if !spawn_analysis.issues.is_empty() {
-                for issue in &spawn_analysis.issues {
-                    ui.label(
-                        RichText::new(format!("  • {}", issue))
-                            .size(11.0)
-                            .color(Color32::from_rgb(255, 180, 150)),
-                    );
-                }
-            }
-            if !spawn_analysis.advantages.is_empty() {
-                for adv in &spawn_analysis.advantages {
-                    ui.label(
-                        RichText::new(format!("  ✓ {}", adv))
-                            .size(11.0)
-                            .color(Color32::from_rgb(150, 220, 150)),
-                    );
-                }
-            }
-            if !spawn_analysis.nearby_resources.animals.is_empty() {
-                ui.add_space(4.0);
-                let animals: Vec<_> = spawn_analysis
-                    .nearby_resources
-                    .animals
-                    .iter()
-                    .map(|a| a.display())
-                    .collect();
-                ui.label(
-                    RichText::new(format!("附近动物: {}", animals.join(", ")))
-                        .size(11.0)
-                        .color(colors.text_secondary),
-                );
-            }
-        }
 
-        if let Some(terrain) = summary.terrain.as_ref() {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new("Terrain Metrics")
-                    .size(13.0)
-                    .color(colors.text_secondary)
-                    .strong(),
-            );
-            ui.add_space(6.0);
-            ui.horizontal_wrapped(|ui| {
-                stat_pill(ui, "AVG", format!("{:.1}", terrain.avg_height), colors);
-                stat_pill(ui, "MIN", format!("{:.1}", terrain.min_height), colors);
-                stat_pill(ui, "MAX", format!("{:.1}", terrain.max_height), colors);
-                stat_pill(ui, "RELIEF", format!("{:.1}", terrain.relief), colors);
-            });
-        }
-        if !summary.biomes.is_empty() {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new("Biomes")
-                    .size(13.0)
-                    .color(colors.text_secondary)
-                    .strong(),
-            );
-            ui.add_space(5.0);
-            ui.label(format_hits(
-                summary.version,
-                &summary.biomes,
-                &summary.structures,
-            ));
-        }
-        if !summary.structures.is_empty() {
-            ui.add_space(12.0);
-            ui.label(
-                RichText::new("Structures")
-                    .size(13.0)
-                    .color(colors.text_secondary)
-                    .strong(),
-            );
-            ui.add_space(5.0);
-            ui.label(format_structure_hits(&summary.structures));
-        }
-
-        ui.add_space(12.0);
-        ui.label(
-            RichText::new("快速操作")
-                .size(13.0)
-                .color(colors.text_secondary)
-                .strong(),
-        );
-        ui.add_space(4.0);
-        ui.horizontal_wrapped(|ui| {
-            let tp_cmd = format_teleport_command(summary.spawn, "overworld");
-            let coord = format_coordinate_copy(summary.spawn);
-            ui.label(
-                RichText::new(format!("坐标: {}", coord))
-                    .size(11.0)
-                    .color(colors.text_secondary),
-            );
-            ui.label(
-                RichText::new(format!("TP: {}", tp_cmd))
-                    .size(10.0)
-                    .color(Color32::from_rgb(100, 100, 100)),
-            );
-        });
-        ui.add_space(4.0);
-        ui.label(
-            RichText::new(format_nether_info(summary.spawn))
-                .size(11.0)
-                .color(colors.text_secondary),
-        );
-
-        if let Some(farming) = &summary.farming_analysis {
-            if !farming.iron_golem_villages.is_empty()
-                || !farming.special_biomes_for_farms.is_empty()
-            {
-                ui.add_space(12.0);
+            // Templates Section
+            ui.horizontal(|ui| {
                 ui.label(
-                    RichText::new("农场潜力")
+                    RichText::new("模板库")
                         .size(13.0)
-                        .color(colors.text_secondary)
+                        .monospace()
+                        .color(colors.text_muted)
                         .strong(),
                 );
-                ui.add_space(4.0);
-                if farming.iron_golem_villages.len() >= 2 {
-                    ui.label(
-                        RichText::new(format!(
-                            "✓ {} 个村庄可用于刷铁机",
-                            farming.iron_golem_villages.len()
-                        ))
-                        .size(11.0)
-                        .color(Color32::from_rgb(100, 200, 100)),
-                    );
-                }
-                for (_biome, desc) in &farming.special_biomes_for_farms {
-                    ui.label(
-                        RichText::new(format!("• {}", desc))
-                            .size(11.0)
-                            .color(colors.text_secondary),
-                    );
-                }
+                ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                    if ui
+                        .small_button(if self.show_template_panel {
+                            "收起"
+                        } else {
+                            "展开"
+                        })
+                        .clicked()
+                    {
+                        self.show_template_panel = !self.show_template_panel;
+                    }
+                });
+            });
+            ui.add_space(8.0);
+            if self.show_template_panel {
+                self.draw_template_strip(ui, colors);
+                ui.add_space(16.0);
             }
-        }
 
-        if let Some(version_warning) = &summary.version_warning {
-            ui.add_space(12.0);
-            info_warning(ui, version_warning, colors);
+            // Parameters Section
+            ui.label(
+                RichText::new("搜索参数")
+                    .size(13.0)
+                    .monospace()
+                    .color(colors.text_muted)
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            Frame::default()
+                .fill(colors.panel_alt)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    self.draw_controls_form(ui, colors);
+                });
+
+            ui.add_space(16.0);
+
+            // Action Row
+            self.draw_action_row(ui, ctx, colors);
+
+            ui.add_space(20.0);
+
+            // Progress Section
+            ui.label(
+                RichText::new("任务监控")
+                    .size(13.0)
+                    .monospace()
+                    .color(colors.text_muted)
+                    .strong(),
+            );
+            ui.add_space(8.0);
+            Frame::default()
+                .fill(colors.panel_alt)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    if let Some((searched, total, found, current_seed)) = self.progress {
+                        let progress = if total == 0 {
+                            0.0
+                        } else {
+                            searched as f32 / total as f32
+                        };
+                        ui.add(
+                            egui::ProgressBar::new(progress)
+                                .desired_width(ui.available_width())
+                                .fill(colors.accent)
+                                .text(format!("{} / {}", searched, total)),
+                        );
+                        ui.add_space(10.0);
+                        ui.horizontal(|ui| {
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new("当前种子")
+                                        .size(10.0)
+                                        .color(colors.text_muted),
+                                );
+                                ui.label(
+                                    RichText::new(current_seed.to_string())
+                                        .size(12.0)
+                                        .monospace()
+                                        .color(colors.text),
+                                );
+                            });
+                            ui.add_space(20.0);
+                            ui.vertical(|ui| {
+                                ui.label(
+                                    RichText::new("命中数").size(10.0).color(colors.text_muted),
+                                );
+                                ui.label(
+                                    RichText::new(found.to_string())
+                                        .size(12.0)
+                                        .monospace()
+                                        .color(colors.success),
+                                );
+                            });
+                        });
+                    } else {
+                        ui.label(
+                            RichText::new("空闲中")
+                                .size(12.0)
+                                .monospace()
+                                .color(colors.text_muted),
+                        );
+                    }
+                    if let Some(error) = &self.last_error {
+                        ui.add_space(8.0);
+                        warn_box(ui, colors.danger, error);
+                    }
+                });
+        });
+    }
+
+    fn draw_template_strip(&mut self, ui: &mut egui::Ui, colors: Palette) {
+        for (category, templates) in get_templates_by_category() {
+            ui.label(
+                RichText::new(format!("{} {}", category.icon(), category.display()))
+                    .size(12.0)
+                    .color(colors.text_muted),
+            );
+            ui.add_space(4.0);
+            for template in templates {
+                let selected = self.selected_template.as_deref() == Some(template.id);
+                let fill = if selected {
+                    colors.panel_soft
+                } else {
+                    colors.panel_alt
+                };
+                let stroke_color = if selected {
+                    colors.accent
+                } else {
+                    colors.border
+                };
+
+                let response = ui.add(
+                    Button::new(RichText::new(template.name).size(13.0).color(colors.text))
+                        .fill(fill)
+                        .stroke(Stroke::new(1.0, stroke_color))
+                        .min_size(Vec2::new(ui.available_width(), 32.0)),
+                );
+
+                if response.clicked() {
+                    self.apply_template(&template);
+                }
+                response.on_hover_text(template.description);
+                ui.add_space(4.0);
+            }
+            ui.add_space(8.0);
         }
     }
 
-    fn draw_results_area(&mut self, ui: &mut egui::Ui, ctx: &EguiContext, colors: &ThemeColors) {
+    fn draw_controls_form(&mut self, ui: &mut egui::Ui, colors: Palette) {
+        pair_inputs(
+            ui,
+            colors,
+            "起始种子",
+            &mut self.controls.seed_start,
+            "结束种子",
+            &mut self.controls.seed_end,
+        );
+
+        ui.columns(2, |cols| {
+            cols[0].label(
+                RichText::new("游戏版本")
+                    .size(11.0)
+                    .color(colors.text_muted),
+            );
+            version_dropdown(&mut cols[0], &mut self.controls.version_index, colors);
+            cols[1].label(
+                RichText::new("最大命中")
+                    .size(11.0)
+                    .color(colors.text_muted),
+            );
+            text_field(&mut cols[1], colors, &mut self.controls.limit);
+        });
+        ui.add_space(8.0);
+
+        input_block(ui, colors, "需要生物群系", |ui| {
+            multiselect_dropdown(
+                ui,
+                &mut self.controls.require_biome,
+                BIOME_FILTER_OPTIONS,
+                "required-biome",
+                colors,
+            )
+        });
+        input_block(ui, colors, "排除生物群系", |ui| {
+            multiselect_dropdown(
+                ui,
+                &mut self.controls.forbid_biome,
+                BIOME_FILTER_OPTIONS,
+                "forbidden-biome",
+                colors,
+            )
+        });
+
+        pair_inputs(
+            ui,
+            colors,
+            "群系检索半径",
+            &mut self.controls.biome_radius,
+            "群系采样步长",
+            &mut self.controls.biome_step,
+        );
+
+        input_block(ui, colors, "需要关键结构", |ui| {
+            multiselect_dropdown(
+                ui,
+                &mut self.controls.require_structure,
+                STRUCTURE_FILTER_OPTIONS,
+                "required-structure",
+                colors,
+            )
+        });
+
+        pair_inputs(
+            ui,
+            colors,
+            "结构检索半径",
+            &mut self.controls.structure_radius,
+            "地形检索半径",
+            &mut self.controls.terrain_radius,
+        );
+        pair_inputs(
+            ui,
+            colors,
+            "最小平均高",
+            &mut self.controls.min_avg_height,
+            "最大平均高",
+            &mut self.controls.max_avg_height,
+        );
+        pair_inputs(
+            ui,
+            colors,
+            "最大高差",
+            &mut self.controls.max_relief,
+            "预览图半径",
+            &mut self.controls.preview_radius,
+        );
+
+        input_block(ui, colors, "预览图尺寸", |ui| {
+            text_field(ui, colors, &mut self.controls.preview_image_size)
+        });
+    }
+
+    fn draw_action_row(&mut self, ui: &mut egui::Ui, ctx: &EguiContext, colors: Palette) {
+        ui.horizontal(|ui| {
+            let search_btn = Button::new(
+                RichText::new(if self.is_searching {
+                    "搜索中..."
+                } else {
+                    "开始筛种"
+                })
+                .size(13.0)
+                .strong()
+                .monospace()
+                .color(colors.bg),
+            )
+            .fill(colors.accent)
+            .min_size(Vec2::new(120.0, 36.0));
+
+            if ui.add(search_btn).clicked() && !self.is_searching {
+                self.start_search(ctx);
+            }
+
+            if ui
+                .add_enabled(
+                    self.is_searching,
+                    Button::new(RichText::new("停止").size(12.0)).min_size(Vec2::new(60.0, 36.0)),
+                )
+                .clicked()
+            {
+                self.stop_search();
+                self.status_line = "Search stopped".into();
+            }
+
+            if ui
+                .add_sized([60.0, 36.0], Button::new(RichText::new("清空").size(12.0)))
+                .clicked()
+            {
+                self.clear_results();
+            }
+
+            if ui
+                .add_enabled(
+                    !self.results.is_empty(),
+                    Button::new(RichText::new("导出").size(12.0)).min_size(Vec2::new(60.0, 36.0)),
+                )
+                .clicked()
+            {
+                if let Some(path) = rfd::FileDialog::new()
+                    .add_filter("Text", &["txt"])
+                    .save_file()
+                {
+                    let _ = fs::write(path, self.export_results());
+                }
+            }
+        });
+    }
+
+    fn draw_center_ledger(&mut self, ui: &mut egui::Ui, ctx: &EguiContext, colors: Palette) {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new("命中数据台")
+                    .size(16.0)
+                    .monospace()
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                ui.label(
+                    RichText::new(format!("{} MATCHES", self.results.len()))
+                        .size(12.0)
+                        .monospace()
+                        .color(colors.text_muted),
+                );
+            });
+        });
+        ui.add_space(12.0);
+
+        if self.results.is_empty() {
+            ui.centered_and_justified(|ui| {
+                ui.label(
+                    RichText::new(
+                        "Awaiting telemetry...
+Adjust parameters and initiate search.",
+                    )
+                    .size(14.0)
+                    .color(colors.text_muted)
+                    .monospace(),
+                );
+            });
+            return;
+        }
+
+        let mut clicked_index = None;
+        let mut toggle_fav_idx = None;
+
+        // Table header
         Frame::default()
-            .fill(colors.bg_secondary)
-            .stroke(Stroke::new(1.0, colors.border))
-            .corner_radius(CornerRadius::same(20))
-            .inner_margin(Margin::same(16))
+            .fill(colors.panel_alt)
+            .corner_radius(CornerRadius::same(4))
+            .inner_margin(Margin::symmetric(16, 8))
             .show(ui, |ui| {
                 ui.horizontal(|ui| {
-                    ui.label(
-                        RichText::new("Matches")
-                            .size(22.0)
-                            .color(colors.text_primary)
-                            .strong(),
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(180.0, 20.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new("种子号")
+                                    .size(11.0)
+                                    .monospace()
+                                    .color(colors.text_muted),
+                            );
+                        },
                     );
-                    ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                        ui.label(
-                            RichText::new(format!("{} results", self.results.len()))
-                                .size(13.0)
-                                .color(colors.text_secondary),
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(100.0, 20.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new("出生点")
+                                    .size(11.0)
+                                    .monospace()
+                                    .color(colors.text_muted),
+                            );
+                        },
+                    );
+                    ui.allocate_ui_with_layout(
+                        Vec2::new(80.0, 20.0),
+                        egui::Layout::left_to_right(egui::Align::Center),
+                        |ui| {
+                            ui.label(
+                                RichText::new("评级")
+                                    .size(11.0)
+                                    .monospace()
+                                    .color(colors.text_muted),
+                            );
+                        },
+                    );
+                    ui.label(
+                        RichText::new("关键指标")
+                            .size(11.0)
+                            .monospace()
+                            .color(colors.text_muted),
+                    );
+                });
+            });
+
+        ui.add_space(4.0);
+
+        ScrollArea::vertical().show(ui, |ui| {
+            for (index, summary) in self.results.iter().enumerate() {
+                let selected = self.selected_result == Some(index);
+                let bg_color = if selected {
+                    colors.panel_soft
+                } else {
+                    colors.panel
+                };
+
+                let response = Frame::default()
+                    .fill(bg_color)
+                    .stroke(Stroke::new(
+                        1.0,
+                        if selected {
+                            colors.border
+                        } else {
+                            Color32::TRANSPARENT
+                        },
+                    ))
+                    .corner_radius(CornerRadius::same(6))
+                    .inner_margin(Margin::symmetric(16, 12))
+                    .show(ui, |ui| {
+                        ui.horizontal(|ui| {
+                            // SEED ID
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(180.0, 24.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(format!("{}", summary.seed))
+                                            .size(15.0)
+                                            .strong()
+                                            .monospace()
+                                            .color(colors.accent),
+                                    );
+                                },
+                            );
+
+                            // SPAWN
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(100.0, 24.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    ui.label(
+                                        RichText::new(format!(
+                                            "{}, {}",
+                                            summary.spawn.x, summary.spawn.z
+                                        ))
+                                        .size(12.0)
+                                        .monospace()
+                                        .color(colors.text_muted),
+                                    );
+                                },
+                            );
+
+                            // RATING
+                            ui.allocate_ui_with_layout(
+                                Vec2::new(80.0, 24.0),
+                                egui::Layout::left_to_right(egui::Align::Center),
+                                |ui| {
+                                    if let Some(score) = &summary.score {
+                                        let color = match score.grade {
+                                            crate::scoring::SeedGrade::S => colors.warning,
+                                            crate::scoring::SeedGrade::A => colors.success,
+                                            crate::scoring::SeedGrade::B => colors.accent,
+                                            crate::scoring::SeedGrade::C => colors.text,
+                                            crate::scoring::SeedGrade::D => colors.text_muted,
+                                            crate::scoring::SeedGrade::F => colors.danger,
+                                        };
+                                        ui.label(
+                                            RichText::new(score.grade.display())
+                                                .size(14.0)
+                                                .strong()
+                                                .color(color),
+                                        );
+                                    } else {
+                                        ui.label("-");
+                                    }
+                                },
+                            );
+
+                            // METRICS
+                            ui.vertical(|ui| {
+                                if !summary.structures.is_empty() {
+                                    let line = summary
+                                        .structures
+                                        .iter()
+                                        .take(3)
+                                        .map(|(kind, hit)| format!("{}({})", kind, hit.distance))
+                                        .collect::<Vec<_>>()
+                                        .join(" ");
+                                    ui.label(
+                                        RichText::new(line).size(11.0).color(colors.text_muted),
+                                    );
+                                } else {
+                                    ui.label(
+                                        RichText::new("无结构数据")
+                                            .size(11.0)
+                                            .color(colors.text_muted)
+                                            .monospace(),
+                                    );
+                                }
+                            });
+
+                            // FAVORITE
+                            ui.with_layout(
+                                egui::Layout::right_to_left(egui::Align::Center),
+                                |ui| {
+                                    let star = if summary.is_favorite { "★" } else { "☆" };
+                                    let star_color = if summary.is_favorite {
+                                        colors.warning
+                                    } else {
+                                        colors.border
+                                    };
+                                    if ui
+                                        .add(
+                                            Button::new(
+                                                RichText::new(star).size(16.0).color(star_color),
+                                            )
+                                            .fill(Color32::TRANSPARENT)
+                                            .stroke(Stroke::NONE),
+                                        )
+                                        .clicked()
+                                    {
+                                        toggle_fav_idx = Some(index);
+                                    }
+                                },
+                            );
+                        });
+                    });
+
+                if ui
+                    .interact(
+                        response.response.rect,
+                        ui.id().with(("row", index)),
+                        egui::Sense::click(),
+                    )
+                    .clicked()
+                {
+                    clicked_index = Some(index);
+                }
+                ui.add_space(4.0);
+            }
+        });
+
+        if let Some(idx) = toggle_fav_idx {
+            self.toggle_favorite(idx);
+        } else if let Some(index) = clicked_index {
+            self.select_result(index, ctx);
+        }
+    }
+
+    fn draw_right_inspector(&mut self, ui: &mut egui::Ui, colors: Palette) {
+        ScrollArea::vertical().show(ui, |ui| {
+            ui.label(
+                RichText::new("预览检视器")
+                    .size(16.0)
+                    .monospace()
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.add_space(12.0);
+
+            // Map Preview
+            Frame::default()
+                .fill(colors.preview_bg)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(8))
+                .inner_margin(Margin::same(8))
+                .show(ui, |ui| {
+                    ui.set_min_height(340.0);
+                    ui.centered_and_justified(|ui| {
+                        if let Some(texture) = &self.preview_texture {
+                            let size = texture.size_vec2();
+                            let max = ui.available_size();
+                            let scale = (max.x / size.x).min(max.y / size.y).max(0.1);
+                            ui.image((texture.id(), size * scale));
+                        } else {
+                            ui.label(
+                                RichText::new(&self.preview_status)
+                                    .size(12.0)
+                                    .monospace()
+                                    .color(colors.text_muted),
+                            );
+                        }
+                    });
+                });
+
+            ui.add_space(16.0);
+
+            if let Some(index) = self.selected_result {
+                let summary = &self.results[index];
+                self.draw_dossier(ui, summary, colors);
+            } else {
+                warn_box(ui, colors.warning, "请从数据台中选择一个种子以查看详细分析");
+            }
+        });
+    }
+
+    fn draw_dossier(&self, ui: &mut egui::Ui, summary: &MatchSummary, colors: Palette) {
+        ui.horizontal(|ui| {
+            ui.label(
+                RichText::new(format!("SEED {}", summary.seed))
+                    .size(22.0)
+                    .monospace()
+                    .color(colors.text)
+                    .strong(),
+            );
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                if let Some(score) = &summary.score {
+                    let color = match score.grade {
+                        crate::scoring::SeedGrade::S => colors.warning,
+                        crate::scoring::SeedGrade::A => colors.success,
+                        crate::scoring::SeedGrade::B => colors.accent,
+                        crate::scoring::SeedGrade::C => colors.text,
+                        crate::scoring::SeedGrade::D => colors.text_muted,
+                        crate::scoring::SeedGrade::F => colors.danger,
+                    };
+                    Frame::default()
+                        .fill(color.gamma_multiply(0.2))
+                        .stroke(Stroke::new(1.0, color))
+                        .corner_radius(CornerRadius::same(4))
+                        .inner_margin(Margin::symmetric(12, 4))
+                        .show(ui, |ui| {
+                            ui.label(
+                                RichText::new(format!("RATING {}", score.grade.display()))
+                                    .size(14.0)
+                                    .strong()
+                                    .color(color),
+                            );
+                        });
+                }
+            });
+        });
+
+        ui.add_space(12.0);
+
+        // Key Info Grid
+        ui.columns(2, |cols| {
+            cols[0].vertical(|ui| {
+                ui.label(
+                    RichText::new("出生点坐标")
+                        .size(10.0)
+                        .color(colors.text_muted),
+                );
+                ui.label(
+                    RichText::new(format!("{}, {}", summary.spawn.x, summary.spawn.z))
+                        .size(14.0)
+                        .monospace()
+                        .color(colors.text),
+                );
+            });
+            cols[1].vertical(|ui| {
+                ui.label(
+                    RichText::new("适用版本")
+                        .size(10.0)
+                        .color(colors.text_muted),
+                );
+                ui.label(
+                    RichText::new(&summary.version_label)
+                        .size(14.0)
+                        .monospace()
+                        .color(colors.text),
+                );
+            });
+        });
+
+        ui.add_space(16.0);
+
+        if let Some(score) = &summary.score {
+            ui.label(
+                RichText::new("评分雷达")
+                    .size(12.0)
+                    .monospace()
+                    .color(colors.text_muted),
+            );
+            ui.add_space(8.0);
+
+            Frame::default()
+                .fill(colors.panel_alt)
+                .stroke(Stroke::new(1.0, colors.border))
+                .corner_radius(CornerRadius::same(6))
+                .inner_margin(Margin::same(12))
+                .show(ui, |ui| {
+                    ui.horizontal(|ui| {
+                        score_metric(
+                            ui,
+                            colors,
+                            "综合",
+                            format!("{:.1}", score.overall),
+                            colors.accent,
+                        );
+                        ui.add_space(16.0);
+                        score_metric(
+                            ui,
+                            colors,
+                            "资源",
+                            format!("{:.0}", score.resource_score),
+                            colors.text,
+                        );
+                        ui.add_space(16.0);
+                        score_metric(
+                            ui,
+                            colors,
+                            "安全",
+                            format!("{:.0}", score.safety_score),
+                            colors.text,
+                        );
+                        ui.add_space(16.0);
+                        score_metric(
+                            ui,
+                            colors,
+                            "群系",
+                            format!("{:.0}", score.biome_diversity),
+                            colors.text,
+                        );
+                        ui.add_space(16.0);
+                        score_metric(
+                            ui,
+                            colors,
+                            "结构",
+                            format!("{:.0}", score.structure_score),
+                            colors.text,
                         );
                     });
                 });
-                ui.add_space(6.0);
+            ui.add_space(16.0);
+        }
+
+        if let Some(spawn) = &summary.spawn_analysis {
+            let safety = if spawn.is_safe {
+                "安全出生"
+            } else {
+                "高风险出生"
+            };
+            let safety_color = if spawn.is_safe {
+                colors.success
+            } else {
+                colors.danger
+            };
+            warn_box(ui, safety_color, safety);
+            ui.add_space(12.0);
+        }
+
+        ui.label(
+            RichText::new("快捷指令与数据")
+                .size(12.0)
+                .monospace()
+                .color(colors.text_muted),
+        );
+        ui.add_space(8.0);
+        Frame::default()
+            .fill(colors.panel_alt)
+            .stroke(Stroke::new(1.0, colors.border))
+            .corner_radius(CornerRadius::same(6))
+            .inner_margin(Margin::same(12))
+            .show(ui, |ui| {
+                ui.horizontal(|ui| {
+                    let cp_txt = format_coordinate_copy(summary.spawn);
+                    if ui.button("复制坐标").on_hover_text(&cp_txt).clicked() {
+                        ui.ctx().copy_text(cp_txt.clone());
+                    }
+
+                    let tp_txt = format_teleport_command(summary.spawn, "overworld");
+                    if ui.button("复制TP指令").on_hover_text(&tp_txt).clicked() {
+                        ui.ctx().copy_text(tp_txt.clone());
+                    }
+                });
+                ui.add_space(8.0);
                 ui.label(
-                    RichText::new("点击任意种子，右侧地图预览会立即切换")
-                        .size(12.5)
-                        .color(colors.text_secondary),
+                    RichText::new(format_nether_info(summary.spawn))
+                        .size(11.0)
+                        .monospace()
+                        .color(colors.text_muted),
                 );
-                ui.add_space(10.0);
-
-                ScrollArea::vertical()
-                    .auto_shrink([false, false])
-                    .max_height(420.0)
-                    .show(ui, |ui| {
-                        for index in 0..self.results.len() {
-                            let selected = self.selected_result == Some(index);
-                            let card = result_row(&self.results[index]);
-                            let fill = if selected {
-                                colors.card_selected
-                            } else {
-                                colors.card_bg
-                            };
-                            let mut preview_clicked = false;
-                            let mut favorite_clicked = false;
-
-                            let response = Frame::default()
-                                .fill(fill)
-                                .stroke(Stroke::new(
-                                    1.0,
-                                    if selected {
-                                        colors.accent
-                                    } else {
-                                        colors.border
-                                    },
-                                ))
-                                .corner_radius(CornerRadius::same(14))
-                                .inner_margin(Margin::same(12))
-                                .show(ui, |ui| {
-                                    ui.set_min_width(ui.available_width());
-                                    ui.set_min_height(68.0);
-                                    ui.horizontal(|ui| {
-                                        ui.vertical(|ui| {
-                                            ui.horizontal(|ui| {
-                                                ui.label(
-                                                    RichText::new(format!("Seed {}", card.seed))
-                                                        .size(17.0)
-                                                        .color(colors.text_primary)
-                                                        .strong(),
-                                                );
-                                                if card.is_favorite {
-                                                    ui.label(
-                                                        RichText::new("★")
-                                                            .size(14.0)
-                                                            .color(colors.accent),
-                                                    );
-                                                }
-                                            });
-                                            ui.add_space(2.0);
-                                            ui.label(
-                                                RichText::new(card.subtitle)
-                                                    .size(13.0)
-                                                    .color(colors.text_secondary),
-                                            );
-                                        });
-                                        ui.with_layout(
-                                            egui::Layout::right_to_left(egui::Align::Center),
-                                            |ui| {
-                                                if ui
-                                                    .add(
-                                                        Button::new(
-                                                            RichText::new("预览")
-                                                                .size(13.0)
-                                                                .strong(),
-                                                        )
-                                                        .fill(colors.accent)
-                                                        .stroke(Stroke::new(
-                                                            1.0,
-                                                            colors.accent_light,
-                                                        ))
-                                                        .min_size(Vec2::new(72.0, 34.0)),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    preview_clicked = true;
-                                                }
-                                                if ui
-                                                    .add(
-                                                        Button::new(
-                                                            RichText::new(if card.is_favorite {
-                                                                "取消收藏"
-                                                            } else {
-                                                                "收藏"
-                                                            })
-                                                            .size(12.0),
-                                                        )
-                                                        .min_size(Vec2::new(60.0, 28.0)),
-                                                    )
-                                                    .clicked()
-                                                {
-                                                    favorite_clicked = true;
-                                                }
-                                                if let Some(relief) = card.relief {
-                                                    detail_chip(
-                                                        ui,
-                                                        format!("relief {:.1}", relief),
-                                                        colors,
-                                                    );
-                                                }
-                                                if let Some(structure) = card.first_structure {
-                                                    detail_chip(ui, structure, colors);
-                                                }
-                                            },
-                                        );
-                                    });
-                                })
-                                .response
-                                .interact(egui::Sense::click());
-
-                            if response.clicked() || preview_clicked {
-                                self.select_result(index, ctx);
-                            }
-
-                            if favorite_clicked {
-                                self.toggle_favorite(index);
-                            }
-
-                            ui.add_space(8.0);
-                        }
-                    });
             });
     }
 }
 
 impl eframe::App for SeedFinderApp {
     fn update(&mut self, ctx: &EguiContext, _frame: &mut eframe::Frame) {
-        self.receive_worker_messages(ctx);
+        self.receive_worker_messages();
         self.receive_preview_messages(ctx);
-
         if self.is_searching {
-            ctx.request_repaint_after(Duration::from_millis(16));
+            ctx.request_repaint_after(Duration::from_millis(100));
         }
-
         self.draw_ui(ctx);
     }
 }
 
-fn configure_fonts(ctx: &EguiContext) {
-    let mut fonts = FontDefinitions::default();
-
-    for path in candidate_font_paths() {
-        let Ok(bytes) = fs::read(path) else {
-            continue;
-        };
-
-        let font_name = format!("system-cjk-{}", fonts.font_data.len());
-        fonts
-            .font_data
-            .insert(font_name.clone(), FontData::from_owned(bytes).into());
-
-        if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
-            family.insert(0, font_name.clone());
-        }
-        if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
-            family.insert(0, font_name);
-        }
-
-        ctx.set_fonts(fonts);
-        return;
-    }
-}
-
-fn candidate_font_paths() -> Vec<&'static str> {
-    let mut paths = Vec::new();
-
-    if cfg!(target_os = "windows") {
-        paths.extend([
-            r"C:\Windows\Fonts\msyh.ttc",
-            r"C:\Windows\Fonts\msyhbd.ttc",
-            r"C:\Windows\Fonts\simhei.ttf",
-            r"C:\Windows\Fonts\simsun.ttc",
-            r"C:\Windows\Fonts\Deng.ttf",
-            r"C:\Windows\Fonts\YuGothM.ttc",
-            r"C:\Windows\Fonts\Arialuni.ttf",
-        ]);
-    }
-
-    if cfg!(target_os = "macos") {
-        paths.extend([
-            "/Library/Fonts/Arial Unicode.ttf",
-            "/System/Library/Fonts/Hiragino Sans GB.ttc",
-            "/System/Library/Fonts/STHeiti Light.ttc",
-            "/System/Library/Fonts/STHeiti Medium.ttc",
-            "/System/Library/Fonts/PingFang.ttc",
-        ]);
-    }
-
-    if cfg!(target_os = "linux") {
-        paths.extend([
-            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
-            "/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf",
-            "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
-            "/usr/share/fonts/truetype/arphic/uming.ttc",
-        ]);
-    }
-
-    paths
-}
-
-fn configure_theme_with_colors(ctx: &EguiContext, colors: &ThemeColors) {
-    let mut visuals = egui::Visuals::dark();
-    visuals.override_text_color = Some(colors.text_primary);
-    visuals.panel_fill = colors.bg_primary;
-    visuals.faint_bg_color = colors.bg_tertiary;
-    visuals.extreme_bg_color = colors.bg_primary;
-    visuals.widgets.noninteractive.bg_fill = colors.bg_tertiary;
-    visuals.widgets.inactive.bg_fill = colors.card_bg;
-    visuals.widgets.hovered.bg_fill = colors.card_selected;
-    visuals.widgets.active.bg_fill = colors.accent;
-    visuals.widgets.open.bg_fill = colors.bg_tertiary;
-    visuals.selection.bg_fill = colors.accent;
-    visuals.selection.stroke = Stroke::new(1.0, colors.accent_light);
-    visuals.window_corner_radius = CornerRadius::same(20);
-
-    let mut style = (*ctx.style()).clone();
-    style.visuals = visuals;
-    style.spacing.item_spacing = Vec2::new(10.0, 12.0);
-    style.spacing.button_padding = Vec2::new(14.0, 12.0);
-    style.spacing.indent = 14.0;
-    style.text_styles.insert(
-        egui::TextStyle::Heading,
-        egui::FontId::new(26.0, egui::FontFamily::Proportional),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Body,
-        egui::FontId::new(14.0, egui::FontFamily::Proportional),
-    );
-    style.text_styles.insert(
-        egui::TextStyle::Button,
-        egui::FontId::new(14.5, egui::FontFamily::Proportional),
-    );
-    ctx.set_style(style);
-}
-
-fn hero_panel(ui: &mut egui::Ui, title: &str, subtitle: &str, status: &str, colors: &ThemeColors) {
-    Frame::default()
-        .fill(colors.bg_tertiary)
-        .stroke(Stroke::new(1.0, colors.border))
-        .corner_radius(CornerRadius::same(22))
-        .inner_margin(Margin::same(16))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(title)
-                    .size(31.0)
-                    .color(colors.text_primary)
-                    .strong(),
-            );
-            ui.add_space(4.0);
-            ui.label(
-                RichText::new(subtitle)
-                    .size(13.5)
-                    .color(colors.text_secondary),
-            );
-            ui.add_space(12.0);
-            info_badge(ui, status, colors);
-        });
-}
-
-fn panel_section(
+fn score_metric(
     ui: &mut egui::Ui,
-    title: &str,
-    colors: &ThemeColors,
-    add_contents: impl FnOnce(&mut egui::Ui),
+    colors: Palette,
+    label: &str,
+    value: String,
+    value_color: Color32,
 ) {
-    Frame::default()
-        .fill(colors.bg_tertiary)
-        .stroke(Stroke::new(1.0, colors.border))
-        .corner_radius(CornerRadius::same(18))
-        .inner_margin(Margin::same(14))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(title)
-                    .size(12.0)
-                    .color(colors.accent)
-                    .strong(),
-            );
-            ui.add_space(8.0);
-            add_contents(ui);
-        });
+    ui.vertical(|ui| {
+        ui.label(RichText::new(label).size(10.0).color(colors.text_muted));
+        ui.label(
+            RichText::new(value)
+                .size(16.0)
+                .monospace()
+                .strong()
+                .color(value_color),
+        );
+    });
 }
 
-fn stat_pill(ui: &mut egui::Ui, label: &str, value: String, colors: &ThemeColors) {
+fn stat_badge(ui: &mut egui::Ui, colors: Palette, label: &str, value: &str) {
     Frame::default()
-        .fill(colors.card_bg)
+        .fill(colors.panel)
         .stroke(Stroke::new(1.0, colors.border))
-        .corner_radius(CornerRadius::same(255))
-        .inner_margin(Margin::symmetric(10, 6))
+        .corner_radius(CornerRadius::same(4))
+        .inner_margin(Margin::symmetric(8, 4))
         .show(ui, |ui| {
             ui.horizontal(|ui| {
                 ui.label(
                     RichText::new(label)
-                        .size(11.0)
-                        .color(colors.text_secondary)
+                        .size(10.0)
+                        .color(colors.text_muted)
                         .strong(),
                 );
                 ui.label(
                     RichText::new(value)
-                        .size(12.5)
-                        .color(colors.text_primary)
-                        .strong(),
+                        .size(11.0)
+                        .color(colors.text)
+                        .monospace(),
                 );
             });
         });
 }
 
-fn info_badge(ui: &mut egui::Ui, text: &str, colors: &ThemeColors) {
+fn warn_box(ui: &mut egui::Ui, color: Color32, text: &str) {
     Frame::default()
-        .fill(colors.bg_tertiary)
-        .stroke(Stroke::new(1.0, colors.accent))
-        .corner_radius(CornerRadius::same(255))
-        .inner_margin(Margin::symmetric(12, 7))
+        .fill(color.gamma_multiply(0.15))
+        .stroke(Stroke::new(1.0, color))
+        .corner_radius(CornerRadius::same(6))
+        .inner_margin(Margin::same(10))
         .show(ui, |ui| {
-            ui.label(RichText::new(text).size(12.5).color(colors.accent_light));
+            ui.horizontal(|ui| {
+                ui.label(RichText::new("!").size(14.0).strong().color(color));
+                ui.label(RichText::new(text).size(12.0).color(color).monospace());
+            });
         });
 }
 
-fn info_warning(ui: &mut egui::Ui, text: &str, _colors: &ThemeColors) {
-    Frame::default()
-        .fill(Color32::from_rgb(64, 46, 31))
-        .stroke(Stroke::new(1.0, Color32::from_rgb(146, 114, 80)))
-        .corner_radius(CornerRadius::same(14))
-        .inner_margin(Margin::same(10))
-        .show(ui, |ui| {
-            ui.label(
-                RichText::new(text)
-                    .size(12.5)
-                    .color(Color32::from_rgb(247, 218, 189)),
-            );
-        });
+fn input_block(ui: &mut egui::Ui, colors: Palette, label: &str, add: impl FnOnce(&mut egui::Ui)) {
+    ui.label(RichText::new(label).size(11.0).color(colors.text_muted));
+    add(ui);
+    ui.add_space(8.0);
+}
+
+fn pair_inputs(
+    ui: &mut egui::Ui,
+    colors: Palette,
+    left_label: &str,
+    left_value: &mut String,
+    right_label: &str,
+    right_value: &mut String,
+) {
+    ui.columns(2, |cols| {
+        cols[0].label(
+            RichText::new(left_label)
+                .size(11.0)
+                .color(colors.text_muted),
+        );
+        text_field(&mut cols[0], colors, left_value);
+        cols[1].label(
+            RichText::new(right_label)
+                .size(11.0)
+                .color(colors.text_muted),
+        );
+        text_field(&mut cols[1], colors, right_value);
+    });
+    ui.add_space(8.0);
+}
+
+fn text_field(ui: &mut egui::Ui, colors: Palette, value: &mut String) {
+    ui.add(
+        egui::TextEdit::singleline(value)
+            .desired_width(f32::INFINITY)
+            .text_color(colors.text)
+            .margin(Vec2::new(8.0, 6.0)),
+    );
 }
 
 fn multiselect_dropdown(
     ui: &mut egui::Ui,
-    label: &str,
     value: &mut String,
     options: &[FilterOption],
     id_source: &str,
-    colors: &ThemeColors,
+    colors: Palette,
 ) {
-    ui.label(RichText::new(label).size(12.5).color(colors.text_secondary));
+    let mut selected: BTreeSet<String> = value
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+        .map(ToOwned::to_owned)
+        .collect();
 
-    let mut selected = parse_selection_set(value);
-    let summary = selection_summary(&selected, options);
+    let summary = if selected.is_empty() {
+        "未选择".to_owned()
+    } else {
+        options
+            .iter()
+            .filter(|option| selected.contains(option.key))
+            .map(|option| option.zh)
+            .take(2)
+            .collect::<Vec<_>>()
+            .join(", ")
+    };
 
     egui::ComboBox::from_id_salt(id_source)
-        .selected_text(summary)
-        .width(ui.available_width().max(180.0))
+        .selected_text(RichText::new(summary).color(colors.text).size(12.0))
+        .width(ui.available_width())
         .show_ui(ui, |ui| {
             ui.set_min_width(260.0);
             ScrollArea::vertical().max_height(220.0).show(ui, |ui| {
                 for option in options {
                     let mut checked = selected.contains(option.key);
-                    let text = format!("{} · {}", option.zh, option.key);
-                    if ui.checkbox(&mut checked, text).changed() {
+                    if ui
+                        .checkbox(&mut checked, format!("{} [{}]", option.zh, option.key))
+                        .changed()
+                    {
                         if checked {
                             selected.insert(option.key.to_owned());
                         } else {
@@ -1503,150 +1458,117 @@ fn multiselect_dropdown(
             });
         });
 
-    *value = format_selection_set(&selected, options);
-}
-
-fn parse_selection_set(raw: &str) -> BTreeSet<String> {
-    raw.split(',')
-        .map(str::trim)
-        .filter(|item| !item.is_empty())
-        .map(ToOwned::to_owned)
-        .collect()
-}
-
-fn format_selection_set(selected: &BTreeSet<String>, options: &[FilterOption]) -> String {
-    options
+    *value = options
         .iter()
         .filter(|option| selected.contains(option.key))
         .map(|option| option.key)
         .collect::<Vec<_>>()
-        .join(",")
+        .join(",");
 }
 
-fn selection_summary(selected: &BTreeSet<String>, options: &[FilterOption]) -> String {
-    if selected.is_empty() {
-        return "未选择".into();
-    }
-
-    let labels = options
-        .iter()
-        .filter(|option| selected.contains(option.key))
-        .map(|option| option.zh)
-        .take(2)
-        .collect::<Vec<_>>();
-
-    if selected.len() <= 2 {
-        labels.join("、")
-    } else {
-        format!("{} 等 {} 项", labels.join("、"), selected.len())
+fn configure_fonts(ctx: &EguiContext) {
+    let mut fonts = FontDefinitions::default();
+    for path in candidate_font_paths() {
+        let Ok(bytes) = fs::read(path) else { continue };
+        let font_name = format!("system-cjk-{}", fonts.font_data.len());
+        fonts
+            .font_data
+            .insert(font_name.clone(), FontData::from_owned(bytes).into());
+        if let Some(family) = fonts.families.get_mut(&FontFamily::Proportional) {
+            family.insert(0, font_name.clone());
+        }
+        if let Some(family) = fonts.families.get_mut(&FontFamily::Monospace) {
+            family.insert(0, font_name);
+        }
+        ctx.set_fonts(fonts);
+        return;
     }
 }
 
-fn field_row(ui: &mut egui::Ui, label: &str, value: &mut String, colors: &ThemeColors) {
-    ui.label(RichText::new(label).size(12.5).color(colors.text_secondary));
-    ui.add(
-        egui::TextEdit::singleline(value)
-            .desired_width(f32::INFINITY)
-            .margin(Vec2::new(12.0, 10.0)),
+fn candidate_font_paths() -> Vec<&'static str> {
+    let mut paths = Vec::new();
+    if cfg!(target_os = "windows") {
+        paths.extend([r"C:\Windows\Fonts\msyh.ttc", r"C:\Windows\Fonts\simhei.ttf"]);
+    }
+    if cfg!(target_os = "macos") {
+        paths.extend([
+            "/Library/Fonts/Arial Unicode.ttf",
+            "/System/Library/Fonts/Hiragino Sans GB.ttc",
+            "/System/Library/Fonts/PingFang.ttc",
+        ]);
+    }
+    if cfg!(target_os = "linux") {
+        paths.extend([
+            "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+            "/usr/share/fonts/opentype/noto/NotoSansCJKSC-Regular.otf",
+        ]);
+    }
+    paths
+}
+
+fn configure_theme(ctx: &EguiContext, colors: Palette) {
+    let mut visuals = egui::Visuals::dark();
+    visuals.override_text_color = Some(colors.text);
+    visuals.panel_fill = colors.bg;
+    visuals.faint_bg_color = colors.panel_alt;
+    visuals.extreme_bg_color = colors.preview_bg;
+
+    visuals.window_corner_radius = CornerRadius::same(6);
+    visuals.widgets.noninteractive.corner_radius = CornerRadius::same(4);
+    visuals.widgets.inactive.corner_radius = CornerRadius::same(4);
+    visuals.widgets.hovered.corner_radius = CornerRadius::same(4);
+    visuals.widgets.active.corner_radius = CornerRadius::same(4);
+    visuals.widgets.open.corner_radius = CornerRadius::same(4);
+
+    visuals.widgets.noninteractive.bg_fill = colors.panel_alt;
+    visuals.widgets.inactive.bg_fill = colors.panel;
+    visuals.widgets.hovered.bg_fill = colors.panel_soft;
+    visuals.widgets.active.bg_fill = colors.accent_soft;
+    visuals.widgets.open.bg_fill = colors.panel_soft;
+    visuals.selection.bg_fill = colors.accent_soft;
+    visuals.selection.stroke = Stroke::new(1.0, colors.accent);
+
+    let mut style = (*ctx.style()).clone();
+    style.visuals = visuals;
+    style.spacing.item_spacing = Vec2::new(10.0, 10.0);
+    style.spacing.button_padding = Vec2::new(12.0, 6.0);
+    style.text_styles.insert(
+        egui::TextStyle::Heading,
+        egui::FontId::new(20.0, egui::FontFamily::Proportional),
     );
+    style.text_styles.insert(
+        egui::TextStyle::Body,
+        egui::FontId::new(13.0, egui::FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        egui::TextStyle::Button,
+        egui::FontId::new(12.0, egui::FontFamily::Proportional),
+    );
+    style.text_styles.insert(
+        egui::TextStyle::Monospace,
+        egui::FontId::new(12.0, egui::FontFamily::Monospace),
+    );
+    ctx.set_style(style);
 }
 
-fn numeric_pair(
-    ui: &mut egui::Ui,
-    left_label: &str,
-    left_value: &mut String,
-    right_label: &str,
-    right_value: &mut String,
-    colors: &ThemeColors,
-) {
-    ui.columns(2, |columns| {
-        field_row(&mut columns[0], left_label, left_value, colors);
-        field_row(&mut columns[1], right_label, right_value, colors);
-    });
-}
+fn version_dropdown(ui: &mut egui::Ui, selected: &mut usize, colors: Palette) {
+    let current_label = VERSION_ENTRIES
+        .get(*selected)
+        .map(|e| e.label)
+        .unwrap_or("UNKNOWN");
 
-fn legend_chip(ui: &mut egui::Ui, color: Color32, label: &str, colors: &ThemeColors) {
-    Frame::default()
-        .fill(colors.card_bg)
-        .stroke(Stroke::new(1.0, colors.border))
-        .corner_radius(CornerRadius::same(255))
-        .inner_margin(Margin::symmetric(10, 6))
-        .show(ui, |ui| {
-            ui.horizontal(|ui| {
-                let (rect, _) = ui.allocate_exact_size(Vec2::splat(9.0), egui::Sense::hover());
-                ui.painter().circle_filled(rect.center(), 4.0, color);
-                ui.label(RichText::new(label).size(12.5).color(colors.text_primary));
-            });
+    egui::ComboBox::from_id_salt("version-select")
+        .selected_text(RichText::new(current_label).color(colors.text).size(12.0))
+        .width(ui.available_width())
+        .show_ui(ui, |ui| {
+            ui.set_min_width(220.0);
+            for (i, entry) in VERSION_ENTRIES.iter().enumerate() {
+                let label = if entry.warning.is_some() {
+                    format!("{} [!]", entry.label)
+                } else {
+                    entry.label.to_string()
+                };
+                ui.selectable_value(selected, i, label);
+            }
         });
-}
-
-fn detail_chip(ui: &mut egui::Ui, label: String, colors: &ThemeColors) {
-    Frame::default()
-        .fill(colors.card_bg)
-        .stroke(Stroke::new(1.0, colors.border))
-        .corner_radius(CornerRadius::same(255))
-        .inner_margin(Margin::symmetric(10, 5))
-        .show(ui, |ui| {
-            ui.label(RichText::new(label).size(12.5).color(colors.text_primary));
-        });
-}
-
-struct ResultRow<'a> {
-    seed: i64,
-    subtitle: String,
-    first_structure: Option<String>,
-    relief: Option<f32>,
-    is_favorite: bool,
-    _marker: std::marker::PhantomData<&'a ()>,
-}
-
-fn result_row(summary: &MatchSummary) -> ResultRow<'_> {
-    let subtitle = format!("spawn ({}, {})", summary.spawn.x, summary.spawn.z);
-    let first_structure = summary
-        .structures
-        .first()
-        .map(|(structure, hit)| format!("{structure} {:.0}m", hit.distance));
-    let relief = summary.terrain.as_ref().map(|terrain| terrain.relief);
-
-    ResultRow {
-        seed: summary.seed,
-        subtitle,
-        first_structure,
-        relief,
-        is_favorite: summary.is_favorite,
-        _marker: std::marker::PhantomData,
-    }
-}
-
-fn format_hits(
-    version: cubiomes::enums::MCVersion,
-    biomes: &[(BiomeID, LocatedBiome)],
-    _structures: &[(StructureType, LocatedStructure)],
-) -> String {
-    biomes
-        .iter()
-        .map(|(biome, hit): &(_, _)| {
-            format!(
-                "{} @ ({}, {}) {:.0}m",
-                biome.to_mc_biome_str(version),
-                hit.position.x,
-                hit.position.z,
-                hit.distance
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("  |  ")
-}
-
-fn format_structure_hits(structures: &[(StructureType, LocatedStructure)]) -> String {
-    structures
-        .iter()
-        .map(|(structure, hit)| {
-            format!(
-                "{} @ ({}, {}) {:.0}m",
-                structure, hit.position.x, hit.position.z, hit.distance
-            )
-        })
-        .collect::<Vec<_>>()
-        .join("  |  ")
 }

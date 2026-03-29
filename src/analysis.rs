@@ -8,7 +8,7 @@ use crate::{
         AnimalType, FarmingAnalysis, FoodSource, MobTowerLocation, NearbyResources, SpawnAnalysis,
         SurfaceType,
     },
-    types::LocatedStructure,
+    types::{LocatedStructure, is_ocean_biome, is_water_biome, surface_y},
 };
 
 pub fn analyze_spawn(
@@ -20,46 +20,33 @@ pub fn analyze_spawn(
     let mut issues = Vec::new();
     let mut advantages = Vec::new();
 
-    let water_biomes: std::collections::HashSet<BiomeID> = [
-        BiomeID::ocean,
-        BiomeID::deep_ocean,
-        BiomeID::warm_ocean,
-        BiomeID::cold_ocean,
-        BiomeID::frozen_ocean,
-        BiomeID::lukewarm_ocean,
-        BiomeID::deep_warm_ocean,
-        BiomeID::deep_cold_ocean,
-        BiomeID::deep_frozen_ocean,
-        BiomeID::river,
-    ]
-    .iter()
-    .copied()
-    .collect();
-
-    let spawn_biome = generator
-        .get_biome_at(spawn.x, surface_y(version), spawn.z)
-        .ok();
-
-    let is_spawn_in_water = spawn_biome
-        .map(|b| water_biomes.contains(&b))
-        .unwrap_or(false);
-
-    let mut water_count = 0;
-    let mut total_count = 0;
-    let radius = 64;
     let y = surface_y(version);
 
-    for dx in -radius..=radius {
-        for dz in -radius..=radius {
+    let spawn_biome = generator.get_biome_at(spawn.x, y, spawn.z).ok();
+
+    let is_spawn_in_water = spawn_biome.map(|b| is_water_biome(b)).unwrap_or(false);
+
+    // Sample at step=4 instead of every block: ~32×32=1024 vs 129×129=16641 calls
+    let step = 4;
+    let radius = 64;
+    let mut water_count = 0u32;
+    let mut total_count = 0u32;
+
+    let mut dx = -radius;
+    while dx <= radius {
+        let mut dz = -radius;
+        while dz <= radius {
             let x = spawn.x + dx;
             let z = spawn.z + dz;
             if let Ok(biome) = generator.get_biome_at(x, y, z) {
                 total_count += 1;
-                if water_biomes.contains(&biome) {
+                if is_water_biome(biome) {
                     water_count += 1;
                 }
             }
+            dz += step;
         }
+        dx += step;
     }
 
     let water_percentage = if total_count > 0 {
@@ -111,44 +98,75 @@ pub fn analyze_spawn(
     }
 }
 
+/// Spiral outward from spawn to find the nearest land block.
+/// Stops as soon as a non-ocean block is found instead of scanning whole rings.
 fn find_nearest_land(
     generator: &Generator,
     spawn: BlockPosition,
     version: MCVersion,
 ) -> Option<f32> {
-    let water_biomes: std::collections::HashSet<BiomeID> = [
-        BiomeID::ocean,
-        BiomeID::deep_ocean,
-        BiomeID::warm_ocean,
-        BiomeID::cold_ocean,
-        BiomeID::frozen_ocean,
-        BiomeID::lukewarm_ocean,
-        BiomeID::deep_warm_ocean,
-        BiomeID::deep_cold_ocean,
-        BiomeID::deep_frozen_ocean,
-    ]
-    .iter()
-    .copied()
-    .collect();
-
     let y = surface_y(version);
+    let step = 8;
+    let max_radius = 256;
 
-    for radius in [16, 32, 64, 128, 256] {
-        for dx in -radius..=radius {
-            for dz in -radius..=radius {
-                let x = spawn.x + dx;
-                let z = spawn.z + dz;
-                if let Ok(biome) = generator.get_biome_at(x, y, z) {
-                    if !water_biomes.contains(&biome) {
-                        let distance = ((dx * dx + dz * dz) as f32).sqrt();
-                        return Some(distance);
-                    }
-                }
-            }
+    // Check spawn itself first
+    if let Ok(biome) = generator.get_biome_at(spawn.x, y, spawn.z) {
+        if !is_ocean_biome(biome) {
+            return Some(0.0);
         }
     }
 
+    // Expand in concentric rings
+    let mut r = step;
+    while r <= max_radius {
+        let mut best_dist_sq: Option<i64> = None;
+
+        // Scan the perimeter of this ring
+        let mut d = -r;
+        while d <= r {
+            // Top edge (z = -r)
+            check_land(generator, spawn, d, -r, y, &mut best_dist_sq);
+            // Bottom edge (z = +r)
+            check_land(generator, spawn, d, r, y, &mut best_dist_sq);
+            // Left edge (x = -r), skip corners already checked
+            if d != -r && d != r {
+                check_land(generator, spawn, -r, d, y, &mut best_dist_sq);
+            }
+            // Right edge (x = +r)
+            if d != -r && d != r {
+                check_land(generator, spawn, r, d, y, &mut best_dist_sq);
+            }
+            d += step;
+        }
+
+        if let Some(dist_sq) = best_dist_sq {
+            return Some((dist_sq as f32).sqrt());
+        }
+        r += step;
+    }
+
     None
+}
+
+fn check_land(
+    generator: &Generator,
+    spawn: BlockPosition,
+    dx: i32,
+    dz: i32,
+    y: i32,
+    best_dist_sq: &mut Option<i64>,
+) {
+    let x = spawn.x + dx;
+    let z = spawn.z + dz;
+    if let Ok(biome) = generator.get_biome_at(x, y, z) {
+        if !is_ocean_biome(biome) {
+            let d = (dx as i64) * (dx as i64) + (dz as i64) * (dz as i64);
+            match best_dist_sq {
+                Some(prev) if *prev <= d => {}
+                _ => *best_dist_sq = Some(d),
+            }
+        }
+    }
 }
 
 fn analyze_nearby_resources(
@@ -317,27 +335,15 @@ fn find_mob_tower_locations(
     let y = surface_y(version);
     let search_radius = 256;
 
-    let ocean_biomes: std::collections::HashSet<BiomeID> = [
-        BiomeID::ocean,
-        BiomeID::deep_ocean,
-        BiomeID::warm_ocean,
-        BiomeID::cold_ocean,
-        BiomeID::frozen_ocean,
-        BiomeID::lukewarm_ocean,
-    ]
-    .iter()
-    .copied()
-    .collect();
-
     for dx in (-search_radius..=search_radius).step_by(64) {
         for dz in (-search_radius..=search_radius).step_by(64) {
             let x = spawn.x + dx;
             let z = spawn.z + dz;
 
             if let Ok(biome) = generator.get_biome_at(x, y, z) {
-                let is_ocean = ocean_biomes.contains(&biome);
+                let ocean = is_ocean_biome(biome);
 
-                let surface_type = if is_ocean {
+                let surface_type = if ocean {
                     SurfaceType::Ocean
                 } else {
                     match biome {
@@ -349,12 +355,12 @@ fn find_mob_tower_locations(
 
                 let distance = ((dx * dx + dz * dz) as f32).sqrt();
 
-                if distance < 200.0 || (is_ocean && distance < 500.0) {
+                if distance < 200.0 || (ocean && distance < 500.0) {
                     locations.push(MobTowerLocation {
                         position: BlockPosition::new(x, z),
-                        height_estimate: if is_ocean { 62 } else { 128 },
+                        height_estimate: if ocean { 62 } else { 128 },
                         surface_type,
-                        is_ocean,
+                        is_ocean: ocean,
                     });
                 }
             }
@@ -386,12 +392,4 @@ pub fn format_teleport_command(pos: BlockPosition, dimension: &str) -> String {
 
 pub fn format_coordinate_copy(pos: BlockPosition) -> String {
     format!("X: {}, Y: ~, Z: {}", pos.x, pos.z)
-}
-
-fn surface_y(version: MCVersion) -> i32 {
-    if (version as i32) >= (MCVersion::MC_1_18_2 as i32) {
-        320
-    } else {
-        255
-    }
 }

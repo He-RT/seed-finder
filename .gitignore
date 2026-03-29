@@ -1,1 +1,25 @@
-/target
+# Rust build outputs
+/target/
+
+# Release packages and local distribution artifacts
+/dist/
+
+# Local backup workspace
+/.backup_ui/
+
+# macOS metadata
+.DS_Store
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# One-off local helper scripts
+/fix_brace.py
+/fix_margin.py
+/fix_ui.py
+/rewrite_ui.py
+/rewrite_ui_zh.py
+
+# Temporary patch files
+*.patch

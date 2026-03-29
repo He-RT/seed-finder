@@ -315,30 +315,26 @@ fn count_rare_biomes(summary: &MatchSummary) -> usize {
 }
 
 fn calculate_structure_score(summary: &MatchSummary) -> f32 {
-    let mut score = 0.0;
-
-    let structure_weights: std::collections::HashMap<StructureType, f32> = [
-        (StructureType::Village, 15.0),
-        (StructureType::Monument, 12.0),
-        (StructureType::Mansion, 12.0),
-        (StructureType::Ancient_City, 15.0),
-        (StructureType::Trial_Chambers, 12.0),
-        (StructureType::Fortress, 10.0),
-        (StructureType::Bastion, 10.0),
-        (StructureType::Outpost, 8.0),
-        (StructureType::Desert_Pyramid, 6.0),
-        (StructureType::Jungle_Temple, 6.0),
-        (StructureType::Shipwreck, 5.0),
-        (StructureType::Ocean_Ruin, 4.0),
-        (StructureType::Treasure, 5.0),
-        (StructureType::Geode, 4.0),
-    ]
-    .iter()
-    .cloned()
-    .collect();
+    let mut score: f32 = 0.0;
 
     for (structure, hit) in &summary.structures {
-        let base_score = structure_weights.get(structure).copied().unwrap_or(3.0);
+        let base_score = match structure {
+            StructureType::Village => 15.0,
+            StructureType::Monument => 12.0,
+            StructureType::Mansion => 12.0,
+            StructureType::Ancient_City => 15.0,
+            StructureType::Trial_Chambers => 12.0,
+            StructureType::Fortress => 10.0,
+            StructureType::Bastion => 10.0,
+            StructureType::Outpost => 8.0,
+            StructureType::Desert_Pyramid => 6.0,
+            StructureType::Jungle_Temple => 6.0,
+            StructureType::Shipwreck => 5.0,
+            StructureType::Ocean_Ruin => 4.0,
+            StructureType::Treasure => 5.0,
+            StructureType::Geode => 4.0,
+            _ => 3.0,
+        };
         let distance_multiplier = if hit.distance < 500.0 {
             1.2
         } else if hit.distance < 1000.0 {

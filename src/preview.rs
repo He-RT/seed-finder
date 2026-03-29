@@ -9,7 +9,7 @@ use eframe::egui::Color32;
 use crate::{
     log_diag,
     search::with_cubiomes_lock,
-    types::{MatchSummary, PreviewRequest},
+    types::{MatchSummary, PreviewRequest, surface_y},
 };
 
 pub fn generate_preview(request: &PreviewRequest) -> Result<eframe::egui::ColorImage> {
@@ -123,14 +123,6 @@ fn generate_preview_locked(request: &PreviewRequest) -> Result<eframe::egui::Col
 
     let _ = &mut generator;
     Ok(eframe::egui::ColorImage::new([size, size], pixels))
-}
-
-fn surface_y(version: cubiomes::enums::MCVersion) -> i32 {
-    if (version as i32) >= (cubiomes::enums::MCVersion::MC_1_18_2 as i32) {
-        320
-    } else {
-        255
-    }
 }
 
 fn world_to_pixel(world: i32, center: i32, radius: i32, size: usize) -> i32 {
